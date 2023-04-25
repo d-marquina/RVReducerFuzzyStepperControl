@@ -39,7 +39,7 @@ int16_t pulses = 10;
 // MCPWM Capture
 uint32_t cap_val_begin_of_sample = 0;
 uint32_t cap_val_end_of_sample = 0;
-uint32_t n_pulses = 0;
+uint32_t n_ticks = 0;
 float vel_rpm = 0;
 //static xQueueHandle cap_queue;
 
@@ -48,16 +48,20 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
     BaseType_t high_task_wakeup = pdFALSE;
 
     // Measure number of ticks during high pulse
-    if (edata->cap_edge == MCPWM_POS_EDGE) {
+    /*if (edata->cap_edge == MCPWM_POS_EDGE) {
         cap_val_begin_of_sample = edata->cap_value;
         cap_val_end_of_sample = cap_val_begin_of_sample;
     } else {
         cap_val_end_of_sample = edata->cap_value;
-        n_pulses = cap_val_end_of_sample - cap_val_begin_of_sample;
-    }
+        n_ticks = cap_val_end_of_sample - cap_val_begin_of_sample;
+    }//*/
 
     // Measure number of ticks between pulses 
-    // TODO
+    if(edata->cap_edge == MCPWM_POS_EDGE){
+      cap_val_end_of_sample = edata->cap_value;
+      n_ticks = cap_val_end_of_sample - cap_val_begin_of_sample;
+      cap_val_begin_of_sample = edata->cap_value;
+    }//*/
 
     return high_task_wakeup == pdTRUE;
 }
@@ -183,7 +187,7 @@ void loop(){
     //pcnt_get_counter_value(PCNT_UNIT_0, &pulses);
     //Serial.println(itoa(pulses, pulses_c, 10));
     //xQueueReceive(cap_queue, &local_pulse_ti, portMAX_DELAY);
-    vel_rpm = 3200000.0/n_pulses;
+    vel_rpm = 1600000.0/n_ticks;
     dtostrf(vel_rpm, 6, 3, vel_rpm_c);
     Serial.println(vel_rpm_c);
     delay(100);
@@ -195,7 +199,7 @@ void loop(){
     //pcnt_get_counter_value(PCNT_UNIT_0, &pulses);
     //Serial.println(itoa(pulses, pulses_c, 10));
     //xQueueReceive(cap_queue, &local_pulse_ti, portMAX_DELAY);
-    vel_rpm = 3200000.0/n_pulses;
+    vel_rpm = 1600000.0/n_ticks;
     dtostrf(vel_rpm, 6, 3, vel_rpm_c);
     Serial.println(vel_rpm_c);
     delay(80);
