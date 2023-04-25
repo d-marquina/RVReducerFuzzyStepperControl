@@ -43,20 +43,6 @@ uint32_t n_pulses = 0;
 float vel_rpm = 0;
 //static xQueueHandle cap_queue;
 
-char *ftoa(double f, char *a){
-  // Convert float to ascii!
-  char *ret = a;
-  long heiltal = (long)f;
-  itoa(heiltal, a, 10);
-  while (*a != '\0') a++;
-  *a++ = '.';
-  int desimal = abs((int)((f - heiltal) * 100));  // int is enough for 2 digits
-  if (desimal< 10)  //are there leading zeros?
-    { *a='0'; a++; }
-  itoa(desimal, a, 10);
-  return ret;
-}
-
 static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t cap_sig, const cap_event_data_t *edata,
                                   void *arg) {
     BaseType_t high_task_wakeup = pdFALSE;
@@ -198,19 +184,21 @@ void loop(){
     //Serial.println(itoa(pulses, pulses_c, 10));
     //xQueueReceive(cap_queue, &local_pulse_ti, portMAX_DELAY);
     vel_rpm = 3200000.0/n_pulses;
-    Serial.println(ftoa(vel_rpm, vel_rpm_c));
+    dtostrf(vel_rpm, 6, 3, vel_rpm_c);
+    Serial.println(vel_rpm_c);
     delay(100);
   }
   ledcWrite(ledChannel, 0);
 
-  for (int i = 0; i < 100; i++){
+  for (int i = 0; i < 50; i++){
     //Serial.println("0"); // step_freq = 0
     //pcnt_get_counter_value(PCNT_UNIT_0, &pulses);
     //Serial.println(itoa(pulses, pulses_c, 10));
     //xQueueReceive(cap_queue, &local_pulse_ti, portMAX_DELAY);
     vel_rpm = 3200000.0/n_pulses;
-    Serial.println(ftoa(vel_rpm, vel_rpm_c));
-    delay(40);
+    dtostrf(vel_rpm, 6, 3, vel_rpm_c);
+    Serial.println(vel_rpm_c);
+    delay(80);
   }
 
   stepper_dir = !stepper_dir;
