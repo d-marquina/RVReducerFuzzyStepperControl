@@ -4,26 +4,16 @@ Arduino Espressiff version: 2.0.6
 #include <Arduino.h>
 #include <HardwareSerial.h>
 #include <TMCStepper.h>
-
 #include "driver/pcnt.h"
 #include "driver/mcpwm.h"
 
-/*#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/queue.h"
-#include "soc/rtc.h"
-#include "esp_log.h"
-
-const static char *TAG = "Custom ESP32";*/
-
 HardwareSerial ESP32Serial1(1);
-
 #define EN_PIN 5                               // Enable
 #define DIR_PIN 4                              // Direction
 #define STEP_PIN 2                             // Step
 #define R_SENSE 0.11f                          // SilentStepStick series use 0.11
 TMC2208Stepper driver(&ESP32Serial1, R_SENSE); // Hardware Serial
-bool stepper_dir = false;
+bool stepper_dir = false;                     // Positive
 
 int led_pin = 21;
 
@@ -32,38 +22,146 @@ int step_freq = 2000; // 2kHz
 const int ledChannel = 0;
 
 // PCNT unit parameters
-int enc_A = 18;
-int enc_B = 19;
-int16_t pulses = 10;
+int out_enc_A = 18;
+int out_enc_B = 19;
+int16_t out_enc_pulses = 10;
+float out_enc_pos = 0;
 
 // MCPWM Capture
-uint32_t cap_val_begin_of_sample = 0;
-uint32_t cap_val_end_of_sample = 0;
-uint32_t n_ticks = 0;
-float vel_rpm = 0;
-//static xQueueHandle cap_queue;
+uint32_t cap_tick_0 = 0;
+uint32_t cap_tick_1 = 0;
+uint32_t cap_n_ticks = 0;
+float out_sp_rpm = 0;
+bool out_sp_dir = false; // Positive
+//int last_cap_tick_edge = 0;
+static uint8_t prevNextCode = 0;
+static uint16_t store=0;
+static int8_t out_enc_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 
-static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t cap_sig, const cap_event_data_t *edata,
-                                  void *arg) {
-    BaseType_t high_task_wakeup = pdFALSE;
+void update_out_sp_rpm(){
+  out_sp_rpm = 400000.0/cap_n_ticks;
+  if(out_sp_dir){ out_sp_rpm = -1*out_sp_rpm; }
+  return;
+}
 
-    // Measure number of ticks during high pulse
-    /*if (edata->cap_edge == MCPWM_POS_EDGE) {
-        cap_val_begin_of_sample = edata->cap_value;
-        cap_val_end_of_sample = cap_val_begin_of_sample;
-    } else {
-        cap_val_end_of_sample = edata->cap_value;
-        n_ticks = cap_val_end_of_sample - cap_val_begin_of_sample;
-    }//*/
+static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t cap_sig, const cap_event_data_t *edata, void *arg) {
+  BaseType_t high_task_wakeup = pdFALSE;
+  // Measure number of ticks during high pulse
+  /*if (edata->cap_edge == MCPWM_POS_EDGE) {
+      cap_tick_0 = edata->cap_value;
+      cap_tick_1 = cap_tick_0;
+  } else {
+      cap_tick_1 = edata->cap_value;
+      cap_n_ticks = cap_tick_1 - cap_tick_0;
+  }//*/
 
-    // Measure number of ticks between pulses 
-    if(edata->cap_edge == MCPWM_POS_EDGE){
-      cap_val_end_of_sample = edata->cap_value;
-      n_ticks = cap_val_end_of_sample - cap_val_begin_of_sample;
-      cap_val_begin_of_sample = edata->cap_value;
-    }//*/
+  // Measure number of ticks between pulses' rising edge 
+  /*if(edata->cap_edge == MCPWM_POS_EDGE){
+    cap_tick_1 = edata->cap_value;
+    cap_n_ticks = cap_tick_1 - cap_tick_0;
+    cap_tick_0 = edata->cap_value;
+  }//*/
 
-    return high_task_wakeup == pdTRUE;
+  // Measure number of ticks between 2 consecutive pulses, from different signals
+  /*cap_tick_1 = edata->cap_value;
+  cap_n_ticks = cap_tick_1 - cap_tick_0;
+  cap_tick_0 = edata->cap_value;//*/
+
+  // Decode direction
+  prevNextCode <<= 2;
+  if (digitalRead(out_enc_B)) prevNextCode |= 0x02;
+  if (digitalRead(out_enc_A)) prevNextCode |= 0x01;
+  prevNextCode &= 0x0f;
+
+   // If valid then store as 16 bit data.
+   if  (out_enc_table[prevNextCode] ) {
+    store <<= 4;
+    store |= prevNextCode;
+    //if (store==0xd42b) return 1;
+    //if (store==0xe817) return -1;
+    if ((store&0xff)==0x2b) out_sp_dir = true;
+    if ((store&0xff)==0x17) out_sp_dir = false;
+
+    // Measure number of ticks between 2 consecutive pulses, from different signals
+    cap_tick_1 = edata->cap_value;
+    cap_n_ticks = cap_tick_1 - cap_tick_0;
+    cap_tick_0 = edata->cap_value;//*/
+   }
+
+  // Detect direction
+  /*int dir_case = 0;
+  if(cap_sig == MCPWM_SELECT_CAP0){ dir_case = 0; }
+  else if(cap_sig == MCPWM_SELECT_CAP1){ dir_case = 8;}
+  else{ dir_case = 17; }
+
+  if(edata->cap_edge == MCPWM_POS_EDGE){ dir_case += 0;}
+  else if(edata->cap_edge == MCPWM_NEG_EDGE){dir_case += 4;}
+  else { dir_case = 17; }
+
+  switch (last_cap_tick_edge){
+    case 0:
+      dir_case += 0;
+      break;
+    case 1:
+      dir_case += 1;
+      break;
+    case 2:
+      dir_case += 2;
+      break;
+    case 3:
+      dir_case += 3;
+      break;  
+    default:
+      dir_case = 17;
+      break;
+  }
+
+  // Save directions
+  switch (dir_case){
+    // Positive
+    case 3: case 6: case 8: case 13:
+      out_sp_dir = false;
+      break;
+    // Negative
+    case 2: case 7: case 9: case 12:
+      out_sp_dir = true;
+      break;
+    // Inverted
+    case 1: case 4: case 11: case 14:
+      out_sp_dir = !out_sp_dir;
+      cap_n_ticks = int(0.5*cap_n_ticks);
+      break;
+    default:
+      out_sp_dir = true;
+      break;
+  }
+
+  // Save last detected edge
+  switch (dir_case){
+    // A+
+    case 0: case 1: case 2: case 3:
+      last_cap_tick_edge = 0;
+      break;
+    // A-
+    case 4: case 5: case 6: case 7:
+      last_cap_tick_edge = 1;
+      break;
+    // B+
+    case 8: case 9: case 10: case 11:
+      last_cap_tick_edge = 2;
+      break;
+    // B-
+    case 12: case 13: case 14: case 15:
+      last_cap_tick_edge = 3;
+      break;
+    default:
+      last_cap_tick_edge = 0;
+      break;
+  }
+  //*/
+
+  
+  return high_task_wakeup == pdTRUE;
 }
 
 void setup(){
@@ -71,16 +169,15 @@ void setup(){
   pinMode(led_pin, OUTPUT);
 
   ESP32Serial1.begin(115200, SERIAL_8N1, 16, 17);
-
-  ledcAttachPin(STEP_PIN, ledChannel);
   pinMode(EN_PIN, OUTPUT);
+  ledcAttachPin(STEP_PIN, ledChannel);
   pinMode(DIR_PIN, OUTPUT);
   digitalWrite(EN_PIN, LOW); // Enable driver in hardware
 
   // Configure PCNT Unit 0
   pcnt_config_t pcnt_u0_ch0 = {
-      .pulse_gpio_num = enc_A,
-      .ctrl_gpio_num = enc_B,      
+      .pulse_gpio_num = out_enc_A,
+      .ctrl_gpio_num = out_enc_B,      
       .lctrl_mode = PCNT_MODE_KEEP,
       .hctrl_mode = PCNT_MODE_REVERSE,
       .pos_mode = PCNT_COUNT_INC,
@@ -91,8 +188,8 @@ void setup(){
       .channel = PCNT_CHANNEL_0,
   };
   pcnt_config_t pcnt_u0_ch1 = {
-      .pulse_gpio_num = enc_B,
-      .ctrl_gpio_num = enc_A,   
+      .pulse_gpio_num = out_enc_B,
+      .ctrl_gpio_num = out_enc_A,   
       .lctrl_mode = PCNT_MODE_REVERSE,
       .hctrl_mode = PCNT_MODE_KEEP,
       .pos_mode = PCNT_COUNT_INC,
@@ -111,27 +208,22 @@ void setup(){
   pcnt_counter_resume(PCNT_UNIT_0);
 
   // Configure MCPWM Capture
-  /*cap_queue = xQueueCreate(1, sizeof(uint32_t));
-  if (cap_queue == NULL) {
-    ESP_LOGE(TAG, "failed to alloc cap_queue");
-    return;
-  }*/
-  mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM_CAP_0, enc_A);
-  mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM_CAP_1, enc_B);
+  mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM_CAP_0, out_enc_A);
+  mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM_CAP_1, out_enc_B);
   mcpwm_capture_config_t mcpwm0_cap0 = {
     .cap_edge = MCPWM_BOTH_EDGE,
     .cap_prescale = 1,
     .capture_cb = mcpwm_isr_function,
     .user_data = NULL
   };
-  /*mcpwm_capture_config_t mcpwm0_cap1 = {
+  mcpwm_capture_config_t mcpwm0_cap1 = {
     .cap_edge = MCPWM_BOTH_EDGE,
     .cap_prescale = 1,
     .capture_cb = mcpwm_isr_function,
     .user_data = NULL
-  };*/
+  };
   mcpwm_capture_enable_channel(MCPWM_UNIT_0, MCPWM_SELECT_CAP0, &mcpwm0_cap0);
-  //mcpwm_capture_enable_channel(MCPWM_UNIT_0, MCPWM_SELECT_CAP1, &mcpwm0_cap1);
+  mcpwm_capture_enable_channel(MCPWM_UNIT_0, MCPWM_SELECT_CAP1, &mcpwm0_cap1);
 
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.toff(5);           // Enables driver in software
@@ -163,12 +255,9 @@ void loop(){
   float step_freq_f = 0;
   char step_freq_c[20];
   char pulses_c[20];
-  char vel_rpm_c[20];
+  char out_sp_rpm_c[20];
 
   for (int i = 0; i < 100; i++){
-    float step_freq_f = 0;
-    char step_freq_c[20];
-    char pulses_c[20];
     if (i < 30){
       step_freq = i - 15;
       step_freq_f = 0.104719333 * step_freq;
@@ -183,25 +272,27 @@ void loop(){
       step_freq = int(1000 * sin(step_freq_f)) + 1000;
       ledcWriteTone(ledChannel, step_freq);
     }
+    // Send data
     //Serial.println(itoa(step_freq, step_freq_c, 10));
-    //pcnt_get_counter_value(PCNT_UNIT_0, &pulses);
-    //Serial.println(itoa(pulses, pulses_c, 10));
-    //xQueueReceive(cap_queue, &local_pulse_ti, portMAX_DELAY);
-    vel_rpm = 1600000.0/n_ticks;
-    dtostrf(vel_rpm, 6, 3, vel_rpm_c);
-    Serial.println(vel_rpm_c);
+    //pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    //Serial.println(itoa(out_enc_pulses, pulses_c, 10));
+    update_out_sp_rpm();
+    //out_sp_rpm = 400000.0/cap_n_ticks;
+    dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
+    Serial.println(out_sp_rpm_c);
     delay(100);
   }
   ledcWrite(ledChannel, 0);
 
   for (int i = 0; i < 50; i++){
+    // Send data
     //Serial.println("0"); // step_freq = 0
-    //pcnt_get_counter_value(PCNT_UNIT_0, &pulses);
-    //Serial.println(itoa(pulses, pulses_c, 10));
-    //xQueueReceive(cap_queue, &local_pulse_ti, portMAX_DELAY);
-    vel_rpm = 1600000.0/n_ticks;
-    dtostrf(vel_rpm, 6, 3, vel_rpm_c);
-    Serial.println(vel_rpm_c);
+    //pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    //Serial.println(itoa(out_enc_pulses, pulses_c, 10));
+    update_out_sp_rpm();
+    //out_sp_rpm = 400000.0/cap_n_ticks;
+    dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
+    Serial.println(out_sp_rpm_c);
     delay(80);
   }
 
