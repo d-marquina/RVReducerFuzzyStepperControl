@@ -32,134 +32,48 @@ uint32_t cap_tick_0 = 0;
 uint32_t cap_tick_1 = 0;
 uint32_t cap_n_ticks = 0;
 float out_sp_rpm = 0;
-bool out_sp_dir = false; // Positive
-//int last_cap_tick_edge = 0;
-static uint8_t prevNextCode = 0;
-static uint16_t store=0;
-static int8_t out_enc_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
+bool out_sp_dir = false; // CCW, Positive
+static uint8_t out_enc_st_code = 0;
+static uint16_t out_enc_st_store=0;
+static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 
 void update_out_sp_rpm(){
-  out_sp_rpm = 400000.0/cap_n_ticks;
-  if(out_sp_dir){ out_sp_rpm = -1*out_sp_rpm; }
+  // Calculate
+  out_sp_rpm = 400000.0/cap_n_ticks; // Max: 5 RPM
+
+  // Approximate to Zero
+  if(out_sp_rpm < 0.1){ // Threshold: 0.1 RPM
+    out_sp_rpm = 0;
+    return;
+  }
+
+  // Apply direction
+  if (out_sp_dir) out_sp_rpm = -1*out_sp_rpm;
+
   return;
 }
 
 static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t cap_sig, const cap_event_data_t *edata, void *arg) {
   BaseType_t high_task_wakeup = pdFALSE;
-  // Measure number of ticks during high pulse
-  /*if (edata->cap_edge == MCPWM_POS_EDGE) {
-      cap_tick_0 = edata->cap_value;
-      cap_tick_1 = cap_tick_0;
-  } else {
-      cap_tick_1 = edata->cap_value;
-      cap_n_ticks = cap_tick_1 - cap_tick_0;
-  }//*/
-
-  // Measure number of ticks between pulses' rising edge 
-  /*if(edata->cap_edge == MCPWM_POS_EDGE){
-    cap_tick_1 = edata->cap_value;
-    cap_n_ticks = cap_tick_1 - cap_tick_0;
-    cap_tick_0 = edata->cap_value;
-  }//*/
-
-  // Measure number of ticks between 2 consecutive pulses, from different signals
-  /*cap_tick_1 = edata->cap_value;
-  cap_n_ticks = cap_tick_1 - cap_tick_0;
-  cap_tick_0 = edata->cap_value;//*/
 
   // Decode direction
-  prevNextCode <<= 2;
-  if (digitalRead(out_enc_B)) prevNextCode |= 0x02;
-  if (digitalRead(out_enc_A)) prevNextCode |= 0x01;
-  prevNextCode &= 0x0f;
+  out_enc_st_code <<= 2;
+  if (digitalRead(out_enc_A)) out_enc_st_code |= 0x01;
+  if (digitalRead(out_enc_B)) out_enc_st_code |= 0x02;
+  out_enc_st_code &= 0x0f;
 
    // If valid then store as 16 bit data.
-   if  (out_enc_table[prevNextCode] ) {
-    store <<= 4;
-    store |= prevNextCode;
-    //if (store==0xd42b) return 1;
-    //if (store==0xe817) return -1;
-    if ((store&0xff)==0x2b) out_sp_dir = true;
-    if ((store&0xff)==0x17) out_sp_dir = false;
+   if (out_enc_st_table[out_enc_st_code] ) {
+    out_enc_st_store <<= 4;
+    out_enc_st_store |= out_enc_st_code;
+    if ((out_enc_st_store&0xff)==0x2b) out_sp_dir = true; // CW, negative
+    if ((out_enc_st_store&0xff)==0x17) out_sp_dir = false; // CCW, positive
 
     // Measure number of ticks between 2 consecutive pulses, from different signals
     cap_tick_1 = edata->cap_value;
     cap_n_ticks = cap_tick_1 - cap_tick_0;
     cap_tick_0 = edata->cap_value;//*/
    }
-
-  // Detect direction
-  /*int dir_case = 0;
-  if(cap_sig == MCPWM_SELECT_CAP0){ dir_case = 0; }
-  else if(cap_sig == MCPWM_SELECT_CAP1){ dir_case = 8;}
-  else{ dir_case = 17; }
-
-  if(edata->cap_edge == MCPWM_POS_EDGE){ dir_case += 0;}
-  else if(edata->cap_edge == MCPWM_NEG_EDGE){dir_case += 4;}
-  else { dir_case = 17; }
-
-  switch (last_cap_tick_edge){
-    case 0:
-      dir_case += 0;
-      break;
-    case 1:
-      dir_case += 1;
-      break;
-    case 2:
-      dir_case += 2;
-      break;
-    case 3:
-      dir_case += 3;
-      break;  
-    default:
-      dir_case = 17;
-      break;
-  }
-
-  // Save directions
-  switch (dir_case){
-    // Positive
-    case 3: case 6: case 8: case 13:
-      out_sp_dir = false;
-      break;
-    // Negative
-    case 2: case 7: case 9: case 12:
-      out_sp_dir = true;
-      break;
-    // Inverted
-    case 1: case 4: case 11: case 14:
-      out_sp_dir = !out_sp_dir;
-      cap_n_ticks = int(0.5*cap_n_ticks);
-      break;
-    default:
-      out_sp_dir = true;
-      break;
-  }
-
-  // Save last detected edge
-  switch (dir_case){
-    // A+
-    case 0: case 1: case 2: case 3:
-      last_cap_tick_edge = 0;
-      break;
-    // A-
-    case 4: case 5: case 6: case 7:
-      last_cap_tick_edge = 1;
-      break;
-    // B+
-    case 8: case 9: case 10: case 11:
-      last_cap_tick_edge = 2;
-      break;
-    // B-
-    case 12: case 13: case 14: case 15:
-      last_cap_tick_edge = 3;
-      break;
-    default:
-      last_cap_tick_edge = 0;
-      break;
-  }
-  //*/
-
   
   return high_task_wakeup == pdTRUE;
 }
@@ -242,7 +156,7 @@ void loop(){
     } else if (i < 75){
       step_freq = 2000;
       ledcWriteTone(ledChannel, step_freq);
-    } else{
+    } else {
       step_freq = 2000*(100-i)/25;
       ledcWriteTone(ledChannel, step_freq);
     }
@@ -266,7 +180,7 @@ void loop(){
     } else if (i < 70){
       step_freq = 2000;
       ledcWriteTone(ledChannel, step_freq);
-    } else{
+    } else {
       step_freq = i + 5;
       step_freq_f = 0.104719333 * step_freq;
       step_freq = int(1000 * sin(step_freq_f)) + 1000;
@@ -301,7 +215,7 @@ void loop(){
 
   if (stepper_dir){
     digitalWrite(led_pin, HIGH);
-  }else{
+  } else {
     digitalWrite(led_pin, LOW);
   }
 }
