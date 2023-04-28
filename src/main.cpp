@@ -6,6 +6,7 @@ Arduino Espressiff version: 2.0.6
 #include <TMCStepper.h>
 #include "driver/pcnt.h"
 #include "driver/mcpwm.h"
+#include <AS5048A.h>
 
 HardwareSerial ESP32Serial1(1);
 #define EN_PIN 5                               // Enable
@@ -37,6 +38,17 @@ static uint8_t out_enc_st_code = 0;
 static uint16_t out_enc_st_store=0;
 static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 
+// SPI Pins
+int8_t VSPI_SCLK = 26;
+int8_t VSPI_MISO = 25;
+int8_t VSPI_MOSI = 33;
+int8_t VSPI_SS = 32;
+AS5048A stepper_enc(VSPI, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS, false);
+float stepper_enc_dg = 0;
+int16_t stepper_enc_raw = 0;
+
+// Custom Functions
+
 void update_out_sp_rpm(){
   // Calculate
   out_sp_rpm = 400000.0/cap_n_ticks; // Max: 5 RPM
@@ -52,6 +64,8 @@ void update_out_sp_rpm(){
 
   return;
 }
+
+// Custom ISR Functions
 
 static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t cap_sig, const cap_event_data_t *edata, void *arg) {
   BaseType_t high_task_wakeup = pdFALSE;
@@ -84,6 +98,7 @@ void setup(){
 
   ESP32Serial1.begin(115200, SERIAL_8N1, 16, 17);
   pinMode(EN_PIN, OUTPUT);
+  ledcSetup(ledChannel, 0, 8);
   ledcAttachPin(STEP_PIN, ledChannel);
   pinMode(DIR_PIN, OUTPUT);
   digitalWrite(EN_PIN, LOW); // Enable driver in hardware
@@ -139,6 +154,12 @@ void setup(){
   mcpwm_capture_enable_channel(MCPWM_UNIT_0, MCPWM_SELECT_CAP0, &mcpwm0_cap0);
   mcpwm_capture_enable_channel(MCPWM_UNIT_0, MCPWM_SELECT_CAP1, &mcpwm0_cap1);
 
+  // Initialize AS5048
+  stepper_enc.beginCustomPins();
+  stepper_enc.setDelay(1);
+  stepper_enc.setZeroPosition(0);
+
+  // Configure driver
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.toff(5);           // Enables driver in software
   driver.rms_current(1000); // Set motor RMS current
@@ -170,6 +191,7 @@ void loop(){
   char step_freq_c[20];
   char pulses_c[20];
   char out_sp_rpm_c[20];
+  char stepper_enc_dg_c[20];
 
   for (int i = 0; i < 100; i++){
     if (i < 30){
@@ -188,12 +210,16 @@ void loop(){
     }
     // Send data
     //Serial.println(itoa(step_freq, step_freq_c, 10));
-    //pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    //Serial.println(itoa(out_enc_pulses, pulses_c, 10));
-    update_out_sp_rpm();
-    //out_sp_rpm = 400000.0/cap_n_ticks;
+    /*pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    Serial.println(itoa(out_enc_pulses, pulses_c, 10));//*/
+    /*update_out_sp_rpm();
     dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.println(out_sp_rpm_c);
+    Serial.println(out_sp_rpm_c);//*/
+    /*stepper_enc_raw = stepper_enc.getRawRotation();
+    Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));//*/
+    stepper_enc_dg = stepper_enc.getRotationInDegrees();
+    dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
+    Serial.println(stepper_enc_dg_c);//*/
     delay(100);
   }
   ledcWrite(ledChannel, 0);
@@ -201,12 +227,16 @@ void loop(){
   for (int i = 0; i < 50; i++){
     // Send data
     //Serial.println("0"); // step_freq = 0
-    //pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    //Serial.println(itoa(out_enc_pulses, pulses_c, 10));
-    update_out_sp_rpm();
-    //out_sp_rpm = 400000.0/cap_n_ticks;
+    /*pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    Serial.println(itoa(out_enc_pulses, pulses_c, 10));//*/
+    /*update_out_sp_rpm();
     dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.println(out_sp_rpm_c);
+    Serial.println(out_sp_rpm_c);//*/
+    /*stepper_enc_raw = stepper_enc.getRawRotation();
+    Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));*/
+    stepper_enc_dg = stepper_enc.getRotationInDegrees();
+    dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
+    Serial.println(stepper_enc_dg_c);//*///*/
     delay(80);
   }
 
@@ -219,5 +249,4 @@ void loop(){
     digitalWrite(led_pin, LOW);
   }
 }
-
 
