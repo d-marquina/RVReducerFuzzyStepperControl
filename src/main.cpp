@@ -10,8 +10,8 @@ Arduino Espressiff version: 2.0.6
 
 HardwareSerial ESP32Serial1(1);
 #define EN_PIN 5                               // Enable
-#define DIR_PIN 4                              // Direction
-#define STEP_PIN 2                             // Step
+#define DIR_PIN 2                              // Direction
+#define STEP_PIN 4                             // Step
 #define R_SENSE 0.11f                          // SilentStepStick series use 0.11
 TMC2208Stepper driver(&ESP32Serial1, R_SENSE); // Hardware Serial
 bool stepper_dir = false;                     // Positive
@@ -23,8 +23,8 @@ int step_freq = 2000; // 2kHz
 const int ledChannel = 0;
 
 // PCNT unit parameters
-int out_enc_A = 18;
-int out_enc_B = 19;
+int out_enc_A = 35;
+int out_enc_B = 34;
 int16_t out_enc_pulses = 10;
 float out_enc_pos = 0;
 
@@ -39,15 +39,31 @@ static uint16_t out_enc_st_store=0;
 static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 
 // SPI Pins
-int8_t VSPI_SCLK = 26;
-int8_t VSPI_MISO = 25;
-int8_t VSPI_MOSI = 33;
-int8_t VSPI_SS = 32;
+int8_t VSPI_MISO = 26;
+int8_t VSPI_SCLK = 25;
+int8_t VSPI_SS = 33;
+int8_t VSPI_MOSI = 32;
 AS5048A stepper_enc(VSPI, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS, false);
 float stepper_enc_dg = 0;
 int16_t stepper_enc_raw = 0;
 
+// Multicore
+TaskHandle_t Task1;
+
 // Custom Functions
+
+//Task1code: blinks an LED every 1000 ms
+void Task1code( void * pvParameters ){
+  Serial.print("Task1 running on core ");
+  Serial.println(xPortGetCoreID());
+
+  for(;;){
+    digitalWrite(led_pin, HIGH);
+    delay(500);
+    digitalWrite(led_pin, LOW);
+    delay(800);
+  } 
+}
 
 void update_out_sp_rpm(){
   // Calculate
@@ -93,6 +109,18 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
 }
 
 void setup(){
+
+  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
+  xTaskCreatePinnedToCore(
+    Task1code,   /* Task function. */
+    "Task1",     /* name of task. */
+    10000,       /* Stack size of task */
+    NULL,        /* parameter of the task */
+    1,           /* priority of the task */
+    &Task1,      /* Task handle to keep track of created task */
+    0);          /* pin task to core 0 */                  
+  delay(500); 
+
   Serial.begin(115200);
   pinMode(led_pin, OUTPUT);
 
@@ -243,10 +271,10 @@ void loop(){
   stepper_dir = !stepper_dir;
   driver.shaft(stepper_dir);
 
-  if (stepper_dir){
+  /*if (stepper_dir){
     digitalWrite(led_pin, HIGH);
   } else {
     digitalWrite(led_pin, LOW);
-  }
+  }//*/
 }
 
