@@ -16,7 +16,7 @@ HardwareSerial ESP32Serial1(1);
 TMC2208Stepper driver(&ESP32Serial1, R_SENSE); // Hardware Serial
 bool stepper_dir = false;                     // Positive
 
-int led_pin = 21;
+int led_pin = 19;
 
 // setting PWM properties
 int step_freq = 2000; // 2kHz
@@ -45,7 +45,7 @@ int8_t VSPI_SS = 33;
 int8_t VSPI_MOSI = 32;
 AS5048A stepper_enc(VSPI, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS, false);
 float stepper_enc_dg = 0;
-int16_t stepper_enc_raw = 0;
+int16_t stepper_enc_raw = 0;//*/
 
 // Multicore
 TaskHandle_t Task1;
@@ -59,9 +59,9 @@ void Task1code( void * pvParameters ){
 
   for(;;){
     digitalWrite(led_pin, HIGH);
-    delay(500);
+    delay(4000);
     digitalWrite(led_pin, LOW);
-    delay(800);
+    delay(4000);
   } 
 }
 
@@ -185,7 +185,7 @@ void setup(){
   // Initialize AS5048
   stepper_enc.beginCustomPins();
   stepper_enc.setDelay(1);
-  stepper_enc.setZeroPosition(0);
+  stepper_enc.setZeroPosition(0);//*/
 
   // Configure driver
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
@@ -221,6 +221,22 @@ void loop(){
   char out_sp_rpm_c[20];
   char stepper_enc_dg_c[20];
 
+  // Debugging AS5048
+  /*Serial.println("ERRORS==============================");
+  Serial.println(stepper_enc.getErrors());
+  Serial.println("DIAGNOSTICS=========================");
+  Serial.println(stepper_enc.getDiagnostic());
+  Serial.println("LECTURE=============================");
+  stepper_enc_dg = stepper_enc.getRotationInDegrees();
+  dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
+  Serial.printf("Angle: ");
+  Serial.println(stepper_enc_dg_c);
+  digitalWrite(VSPI_SS, HIGH);
+  delay(5000);
+  digitalWrite(VSPI_SS, LOW);
+  delay(5000);
+  digitalWrite(VSPI_SS, HIGH);//*/
+
   for (int i = 0; i < 100; i++){
     if (i < 30){
       step_freq = i - 15;
@@ -251,6 +267,17 @@ void loop(){
     delay(100);
   }
   ledcWrite(ledChannel, 0);
+
+  // Debugging AS5048
+  /*Serial.println("ERRORS==============================");
+  Serial.println(stepper_enc.getErrors());
+  Serial.println("DIAGNOSTICS=========================");
+  Serial.println(stepper_enc.getDiagnostic());
+  Serial.println("LECTURE=============================");
+  stepper_enc_dg = stepper_enc.getRotationInDegrees();
+  dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
+  Serial.printf("Angle: ");
+  Serial.println(stepper_enc_dg_c);//*/
 
   for (int i = 0; i < 50; i++){
     // Send data
