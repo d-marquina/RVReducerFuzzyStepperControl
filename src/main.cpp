@@ -52,19 +52,6 @@ TaskHandle_t Task1;
 
 // Custom Functions
 
-//Task1code: blinks an LED every 1000 ms
-void Task1code( void * pvParameters ){
-  Serial.print("Task1 running on core ");
-  Serial.println(xPortGetCoreID());
-
-  for(;;){
-    digitalWrite(led_pin, HIGH);
-    delay(4000);
-    digitalWrite(led_pin, LOW);
-    delay(4000);
-  } 
-}
-
 void update_out_sp_rpm(){
   // Calculate
   out_sp_rpm = 400000.0/cap_n_ticks; // Max: 5 RPM
@@ -79,6 +66,63 @@ void update_out_sp_rpm(){
   if (out_sp_dir) out_sp_rpm = -1*out_sp_rpm;
 
   return;
+}
+
+void debugAS5048A(){
+  float local_stepper_enc_dg = 0;
+  char local_stepper_enc_dg_c[20];//*/
+
+  // Debugging AS5048
+  Serial.println("ERRORS==============================");
+  Serial.println(stepper_enc.getErrors());
+  Serial.println("DIAGNOSTICS=========================");
+  Serial.println(stepper_enc.getDiagnostic());
+  Serial.println("LECTURE=============================");
+  local_stepper_enc_dg = stepper_enc.getRotationInDegrees();
+  dtostrf(local_stepper_enc_dg, 6, 3, local_stepper_enc_dg_c);
+  Serial.printf("Angle: ");
+  Serial.println(local_stepper_enc_dg_c);
+}
+
+//ControlLoopTask: blinks an LED every 1000 ms
+void ControlLoopTask( void * pvParameters ){
+  Serial.print("Task1 running on core ");
+  Serial.println(xPortGetCoreID());
+  const TickType_t taskPeriod = 20; // ms
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+
+  for(;;){
+    // Comms Measured Time: 1.1ms
+    //digitalWrite(led_pin, !digitalRead(led_pin)); // Toggle
+    digitalWrite(led_pin, HIGH);
+
+    // Arrays for Streaming data
+    char step_freq_c[20];
+    char out_enc_pulses_c[20];
+    char out_sp_rpm_c[20];
+    char stepper_enc_dg_c[20];
+
+    // Send data
+    Serial.print(itoa(step_freq, step_freq_c, 10));
+    Serial.print(" ");
+    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
+    Serial.print(" ");//*/
+    update_out_sp_rpm();
+    dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
+    Serial.print(out_sp_rpm_c);
+    Serial.print(" ");//*/
+    /*stepper_enc_raw = stepper_enc.getRawRotation();
+    Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));*/
+    stepper_enc_dg = stepper_enc.getRotationInDegrees();
+    dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
+    Serial.println(stepper_enc_dg_c);//*///*/
+
+    // End of communication
+    digitalWrite(led_pin, LOW);
+
+    vTaskDelayUntil(&xLastWakeTime, taskPeriod);
+  } 
 }
 
 // Custom ISR Functions
@@ -110,10 +154,10 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
 
 void setup(){
 
-  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
+  //create a task that will be executed in the ControlLoopTask() function, with priority 1 and executed on core 0
   xTaskCreatePinnedToCore(
-    Task1code,   /* Task function. */
-    "Task1",     /* name of task. */
+    ControlLoopTask,   /* Task function. */
+    "ControlLoopTask",     /* name of task. */
     10000,       /* Stack size of task */
     NULL,        /* parameter of the task */
     1,           /* priority of the task */
@@ -183,8 +227,7 @@ void setup(){
   mcpwm_capture_enable_channel(MCPWM_UNIT_0, MCPWM_SELECT_CAP1, &mcpwm0_cap1);
 
   // Initialize AS5048
-  stepper_enc.beginCustomPins();
-  stepper_enc.setDelay(1);
+  stepper_enc.beginCustom(5000000, 5);
   stepper_enc.setZeroPosition(0);//*/
 
   // Configure driver
@@ -216,26 +259,13 @@ void loop(){
 
   // Sinusoidal Ramp using LedCPWM
   float step_freq_f = 0;
-  char step_freq_c[20];
-  char pulses_c[20];
+  /*char step_freq_c[20];
+  char out_enc_pulses_c[20];
   char out_sp_rpm_c[20];
-  char stepper_enc_dg_c[20];
+  char stepper_enc_dg_c[20];//*/
 
   // Debugging AS5048
-  /*Serial.println("ERRORS==============================");
-  Serial.println(stepper_enc.getErrors());
-  Serial.println("DIAGNOSTICS=========================");
-  Serial.println(stepper_enc.getDiagnostic());
-  Serial.println("LECTURE=============================");
-  stepper_enc_dg = stepper_enc.getRotationInDegrees();
-  dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
-  Serial.printf("Angle: ");
-  Serial.println(stepper_enc_dg_c);
-  digitalWrite(VSPI_SS, HIGH);
-  delay(5000);
-  digitalWrite(VSPI_SS, LOW);
-  delay(5000);
-  digitalWrite(VSPI_SS, HIGH);//*/
+  debugAS5048A();
 
   for (int i = 0; i < 100; i++){
     if (i < 30){
@@ -253,15 +283,18 @@ void loop(){
       ledcWriteTone(ledChannel, step_freq);
     }
     // Send data
-    //Serial.println(itoa(step_freq, step_freq_c, 10));
-    /*pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    Serial.println(itoa(out_enc_pulses, pulses_c, 10));//*/
+    /*Serial.print(itoa(step_freq, step_freq_c, 10));
+    Serial.print(" ");
+    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
+    Serial.print(" ");//*/
     /*update_out_sp_rpm();
     dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.println(out_sp_rpm_c);//*/
+    Serial.print(out_sp_rpm_c);
+    Serial.print(" ");//*/
     /*stepper_enc_raw = stepper_enc.getRawRotation();
     Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));//*/
-    stepper_enc_dg = stepper_enc.getRotationInDegrees();
+    /*stepper_enc_dg = stepper_enc.getRotationInDegrees();
     dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
     Serial.println(stepper_enc_dg_c);//*/
     delay(100);
@@ -269,27 +302,23 @@ void loop(){
   ledcWrite(ledChannel, 0);
 
   // Debugging AS5048
-  /*Serial.println("ERRORS==============================");
-  Serial.println(stepper_enc.getErrors());
-  Serial.println("DIAGNOSTICS=========================");
-  Serial.println(stepper_enc.getDiagnostic());
-  Serial.println("LECTURE=============================");
-  stepper_enc_dg = stepper_enc.getRotationInDegrees();
-  dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
-  Serial.printf("Angle: ");
-  Serial.println(stepper_enc_dg_c);//*/
+  debugAS5048A();
 
   for (int i = 0; i < 50; i++){
     // Send data
-    //Serial.println("0"); // step_freq = 0
-    /*pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    Serial.println(itoa(out_enc_pulses, pulses_c, 10));//*/
+    step_freq = 0;
+    /*Serial.print("0"); // step_freq = 0
+    Serial.print(" ");
+    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
+    Serial.print(" ");//*/
     /*update_out_sp_rpm();
     dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.println(out_sp_rpm_c);//*/
+    Serial.print(out_sp_rpm_c);
+    Serial.print(" ");//*/
     /*stepper_enc_raw = stepper_enc.getRawRotation();
     Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));*/
-    stepper_enc_dg = stepper_enc.getRotationInDegrees();
+    /*stepper_enc_dg = stepper_enc.getRotationInDegrees();
     dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
     Serial.println(stepper_enc_dg_c);//*///*/
     delay(80);
@@ -298,10 +327,5 @@ void loop(){
   stepper_dir = !stepper_dir;
   driver.shaft(stepper_dir);
 
-  /*if (stepper_dir){
-    digitalWrite(led_pin, HIGH);
-  } else {
-    digitalWrite(led_pin, LOW);
-  }//*/
 }
 

@@ -85,12 +85,12 @@ public:
 	 * Initialiser with custom SPI and custom pins
 	 * Sets up the SPI interface
 	 */
-	void beginCustomPins();
+	void beginCustom(uint64_t freqMHz = 5000000, uint16_t arg_delay = 5);
 
 	/**
 	 * Set a custom delay value
 	 */
-	void setDelay(uint16_t arg_delay);
+	void setCustomDelay(uint16_t arg_delay);
 
 	/**
 	 * Returns the raw angle directly from the sensor

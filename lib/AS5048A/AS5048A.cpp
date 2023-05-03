@@ -87,12 +87,16 @@ void AS5048A::begin()
  * Initialiser with custom SPI and custom pins
  * Sets up the SPI interface
  */
-void AS5048A::beginCustomPins()
+void AS5048A::beginCustom(uint64_t freq, uint16_t arg_delay)
 {
-	setDelay();
+	// delayMicroseconds minimum input equals 3us
+	if (arg_delay < 3) arg_delay = 3;
+	setCustomDelay(arg_delay);
 
-	// 1MHz clock (AMS should be able to accept up to 10MHz)
-	this->settings = SPISettings(3000000, MSBFIRST, SPI_MODE1);
+	// from 1MHz up to 10MHz)
+	if (freq < 1000000) freq = 1000000;
+	if (freq > 10000000) freq = 10000000;
+	this->settings = SPISettings(freq, MSBFIRST, SPI_MODE1);
 
 	//setup pins
 	pinMode(this->_sck, OUTPUT);
@@ -105,9 +109,9 @@ void AS5048A::beginCustomPins()
 }
 
 /**
- * Set a custom delay value
+ * Set a custom delay value in microseconds, greater than 3us
  */
-void AS5048A::setDelay(uint16_t arg_delay)
+void AS5048A::setCustomDelay(uint16_t arg_delay)
 {
 	this->esp32_delay = arg_delay;
 }
@@ -326,7 +330,7 @@ uint16_t AS5048A::read(uint16_t registerAddress)
 	this->spi->transfer16(command);
 	digitalWrite(this->_cs, HIGH);
 
-	delay(this->esp32_delay);
+	delayMicroseconds(this->esp32_delay);
 
 	//Now read the response
 	digitalWrite(this->_cs, LOW);
@@ -409,7 +413,7 @@ uint16_t AS5048A::write(uint16_t registerAddress, uint16_t data)
 	this->spi->transfer16(dataToSend);
 	digitalWrite(this->_cs, HIGH);
 
-	delay(this->esp32_delay);
+	delayMicroseconds(this->esp32_delay);
 
 	digitalWrite(this->_cs, LOW);
 	uint16_t response = this->spi->transfer16(0x0000);
@@ -423,7 +427,7 @@ uint16_t AS5048A::write(uint16_t registerAddress, uint16_t data)
 }
 
 /**
- * Set the delay acording to the microcontroller architecture
+ * Set the delay, in microseconds, acording to the microcontroller architecture
  */
 void AS5048A::setDelay()
 {
@@ -434,13 +438,13 @@ void AS5048A::setDelay()
 		Serial.println("AS5048A working with ESP32");
 	}
 #elif __AVR__
-	this->esp32_delay = 0;
+	this->esp32_delay = 50;
 	if (this->debug)
 	{
 		Serial.println("AS5048A working with AVR");
 	}
 #else
-	this->esp32_delay = 0;
+	this->esp32_delay = 50;
 	if (this->debug)
 	{
 		Serial.println("Device not detected");
