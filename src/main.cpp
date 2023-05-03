@@ -9,9 +9,9 @@ Arduino Espressiff version: 2.0.6
 #include <AS5048A.h>
 
 HardwareSerial ESP32Serial1(1);
-#define EN_PIN 5                               // Enable
 #define DIR_PIN 2                              // Direction
 #define STEP_PIN 4                             // Step
+#define EN_PIN 5                               // Enable
 #define R_SENSE 0.11f                          // SilentStepStick series use 0.11
 TMC2208Stepper driver(&ESP32Serial1, R_SENSE); // Hardware Serial
 bool stepper_dir = false;                     // Positive
@@ -44,7 +44,12 @@ int8_t VSPI_SCLK = 25;
 int8_t VSPI_SS = 33;
 int8_t VSPI_MOSI = 32;
 AS5048A stepper_enc(VSPI, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS, false);
-float stepper_enc_dg = 0;
+float stepper_angle_dg = 0;
+float stepper_sp_dgps = 0;
+float stepper_last_angle_dg = 0;
+float st_enc_current_dg = 0;
+float st_enc_last_dg = 0;
+int16_t st_enc_full_rot = 0;
 int16_t stepper_enc_raw = 0;//*/
 
 // Multicore
@@ -82,6 +87,23 @@ void debugAS5048A(){
   dtostrf(local_stepper_enc_dg, 6, 3, local_stepper_enc_dg_c);
   Serial.printf("Angle: ");
   Serial.println(local_stepper_enc_dg_c);
+
+  return;
+}
+
+void update_stepper_angle_dg(){
+  st_enc_current_dg = stepper_enc.getRotationInDegrees();
+
+  if (st_enc_current_dg >= 0.0 && st_enc_current_dg <= 20.0 && st_enc_last_dg < 360.0 && st_enc_last_dg >= 340.0 ) {
+    st_enc_full_rot++;
+  }
+  if (st_enc_last_dg >= 0.0 && st_enc_last_dg <= 20.0 && st_enc_current_dg < 360.0 && st_enc_current_dg >= 340.0) {
+    st_enc_full_rot--;
+  }
+  stepper_angle_dg = st_enc_current_dg + st_enc_full_rot*360.0;
+  st_enc_last_dg  = st_enc_current_dg;
+
+  return;
 }
 
 //ControlLoopTask: blinks an LED every 1000 ms
@@ -100,7 +122,9 @@ void ControlLoopTask( void * pvParameters ){
     char step_freq_c[20];
     char out_enc_pulses_c[20];
     char out_sp_rpm_c[20];
-    char stepper_enc_dg_c[20];
+    char stepper_angle_dg_c[20];
+    char st_enc_current_dg_c[20];
+    char stepper_sp_dgps_c[20];
 
     // Send data
     Serial.print(itoa(step_freq, step_freq_c, 10));
@@ -113,10 +137,18 @@ void ControlLoopTask( void * pvParameters ){
     Serial.print(out_sp_rpm_c);
     Serial.print(" ");//*/
     /*stepper_enc_raw = stepper_enc.getRawRotation();
-    Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));*/
-    stepper_enc_dg = stepper_enc.getRotationInDegrees();
-    dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
-    Serial.println(stepper_enc_dg_c);//*///*/
+    Serial.println(itoa(stepper_enc_raw, stepper_angle_dg_c, 10));*/
+    update_stepper_angle_dg();
+    dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
+    Serial.print(stepper_angle_dg_c);
+    Serial.print(" ");//*/
+    /*dtostrf(st_enc_current_dg, 6, 3, st_enc_current_dg_c);
+    Serial.println(st_enc_current_dg_c);//*/
+    // Update stepper speed
+    stepper_sp_dgps = (stepper_angle_dg - stepper_last_angle_dg)*50;
+    dtostrf(stepper_sp_dgps, 6, 3, stepper_sp_dgps_c);
+    Serial.println(stepper_sp_dgps_c);
+    stepper_last_angle_dg = stepper_angle_dg;
 
     // End of communication
     digitalWrite(led_pin, LOW);
@@ -174,6 +206,7 @@ void setup(){
   ledcAttachPin(STEP_PIN, ledChannel);
   pinMode(DIR_PIN, OUTPUT);
   digitalWrite(EN_PIN, LOW); // Enable driver in hardware
+  digitalWrite(DIR_PIN, LOW);
 
   // Configure PCNT Unit 0
   pcnt_config_t pcnt_u0_ch0 = {
@@ -259,13 +292,9 @@ void loop(){
 
   // Sinusoidal Ramp using LedCPWM
   float step_freq_f = 0;
-  /*char step_freq_c[20];
-  char out_enc_pulses_c[20];
-  char out_sp_rpm_c[20];
-  char stepper_enc_dg_c[20];//*/
 
   // Debugging AS5048
-  debugAS5048A();
+  //debugAS5048A();
 
   for (int i = 0; i < 100; i++){
     if (i < 30){
@@ -282,50 +311,22 @@ void loop(){
       step_freq = int(1000 * sin(step_freq_f)) + 1000;
       ledcWriteTone(ledChannel, step_freq);
     }
-    // Send data
-    /*Serial.print(itoa(step_freq, step_freq_c, 10));
-    Serial.print(" ");
-    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
-    Serial.print(" ");//*/
-    /*update_out_sp_rpm();
-    dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.print(out_sp_rpm_c);
-    Serial.print(" ");//*/
-    /*stepper_enc_raw = stepper_enc.getRawRotation();
-    Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));//*/
-    /*stepper_enc_dg = stepper_enc.getRotationInDegrees();
-    dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
-    Serial.println(stepper_enc_dg_c);//*/
     delay(100);
   }
   ledcWrite(ledChannel, 0);
 
   // Debugging AS5048
-  debugAS5048A();
+  //debugAS5048A();
 
+  // Stop for 4 seconds
   for (int i = 0; i < 50; i++){
-    // Send data
     step_freq = 0;
-    /*Serial.print("0"); // step_freq = 0
-    Serial.print(" ");
-    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
-    Serial.print(" ");//*/
-    /*update_out_sp_rpm();
-    dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.print(out_sp_rpm_c);
-    Serial.print(" ");//*/
-    /*stepper_enc_raw = stepper_enc.getRawRotation();
-    Serial.println(itoa(stepper_enc_raw, stepper_enc_dg_c, 10));*/
-    /*stepper_enc_dg = stepper_enc.getRotationInDegrees();
-    dtostrf(stepper_enc_dg, 6, 3, stepper_enc_dg_c);
-    Serial.println(stepper_enc_dg_c);//*///*/
     delay(80);
   }
-
-  stepper_dir = !stepper_dir;
-  driver.shaft(stepper_dir);
+  
+  digitalWrite(DIR_PIN, !digitalRead(DIR_PIN));
+  //stepper_dir = !stepper_dir;
+  //driver.shaft(stepper_dir);
 
 }
 
