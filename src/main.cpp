@@ -19,13 +19,13 @@ bool stepper_dir = false;                     // Positive
 int led_pin = 19;
 
 // setting PWM properties
-int step_freq = 2000; // 2kHz
+int16_t step_freq = 0; // 2kHz
 const int ledChannel = 0;
 
 // PCNT unit parameters
 int out_enc_A = 35;
 int out_enc_B = 34;
-int16_t out_enc_pulses = 10;
+int16_t out_enc_pulses = 0;
 float out_enc_pos = 0;
 
 // MCPWM Capture
@@ -53,10 +53,9 @@ int16_t st_enc_full_rot = 0;
 int16_t stepper_enc_raw = 0;//*/
 
 // Multicore
-TaskHandle_t Task1;
+TaskHandle_t ControlLoopTaskHandle;
 
 // Custom Functions
-
 void update_out_sp_rpm(){
   // Calculate
   out_sp_rpm = 400000.0/cap_n_ticks; // Max: 5 RPM
@@ -108,7 +107,7 @@ void update_stepper_angle_dg(){
 
 //ControlLoopTask: blinks an LED every 1000 ms
 void ControlLoopTask( void * pvParameters ){
-  Serial.print("Task1 running on core ");
+  Serial.print("Control Loop Task running on core ");
   Serial.println(xPortGetCoreID());
   const TickType_t taskPeriod = 20; // ms
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -126,29 +125,39 @@ void ControlLoopTask( void * pvParameters ){
     char st_enc_current_dg_c[20];
     char stepper_sp_dgps_c[20];
 
-    // Send data
+    // Update data    
+    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+    update_out_sp_rpm();
+    update_stepper_angle_dg();
+    stepper_sp_dgps = (stepper_angle_dg - stepper_last_angle_dg)*50;
+    stepper_last_angle_dg = stepper_angle_dg;
+
+    // Send data as stream of ASCII characters
     Serial.print(itoa(step_freq, step_freq_c, 10));
     Serial.print(" ");
-    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
     Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
-    Serial.print(" ");//*/
-    update_out_sp_rpm();
+    Serial.print(" ");
     dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
     Serial.print(out_sp_rpm_c);
-    Serial.print(" ");//*/
-    /*stepper_enc_raw = stepper_enc.getRawRotation();
-    Serial.println(itoa(stepper_enc_raw, stepper_angle_dg_c, 10));*/
-    update_stepper_angle_dg();
+    Serial.print(" ");
     dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
     Serial.print(stepper_angle_dg_c);
-    Serial.print(" ");//*/
+    Serial.print(" ");
+    dtostrf(stepper_sp_dgps, 6, 3, stepper_sp_dgps_c);
+    Serial.println(stepper_sp_dgps_c);//*/
+    /*stepper_enc_raw = stepper_enc.getRawRotation();
+    Serial.println(itoa(stepper_enc_raw, stepper_angle_dg_c, 10));*/
     /*dtostrf(st_enc_current_dg, 6, 3, st_enc_current_dg_c);
     Serial.println(st_enc_current_dg_c);//*/
-    // Update stepper speed
-    stepper_sp_dgps = (stepper_angle_dg - stepper_last_angle_dg)*50;
-    dtostrf(stepper_sp_dgps, 6, 3, stepper_sp_dgps_c);
-    Serial.println(stepper_sp_dgps_c);
-    stepper_last_angle_dg = stepper_angle_dg;
+
+    // Send data as binary packet: Serial.write( (uint8_t *) &x, sizeof( x ) );
+    /*uint8_t packet_size = 2;
+    Serial.write( (uint8_t *) &packet_size, sizeof( packet_size ) ); // Packet size
+    Serial.write( (uint8_t *) &step_freq, sizeof( step_freq ) ); // int16_t -> 2 bytes
+    Serial.write( (uint8_t *) &out_enc_pulses, sizeof( out_enc_pulses ) ); // int16_t -> 2 bytes
+    Serial.write( (uint8_t *) &out_sp_rpm, sizeof( out_sp_rpm ) ); // float -> 4 bytes
+    Serial.write( (uint8_t *) &stepper_angle_dg, sizeof( stepper_angle_dg ) ); // float -> 4 bytes
+    Serial.write( (uint8_t *) &stepper_sp_dgps, sizeof( stepper_sp_dgps ) ); // float -> 4 bytes //*/
 
     // End of communication
     digitalWrite(led_pin, LOW);
@@ -158,7 +167,6 @@ void ControlLoopTask( void * pvParameters ){
 }
 
 // Custom ISR Functions
-
 static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t cap_sig, const cap_event_data_t *edata, void *arg) {
   BaseType_t high_task_wakeup = pdFALSE;
 
@@ -185,28 +193,29 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
 }
 
 void setup(){
-
-  //create a task that will be executed in the ControlLoopTask() function, with priority 1 and executed on core 0
+  // Control Loop Task on core 0
   xTaskCreatePinnedToCore(
     ControlLoopTask,   /* Task function. */
     "ControlLoopTask",     /* name of task. */
     10000,       /* Stack size of task */
     NULL,        /* parameter of the task */
     1,           /* priority of the task */
-    &Task1,      /* Task handle to keep track of created task */
+    &ControlLoopTaskHandle,      /* Task handle to keep track of created task */
     0);          /* pin task to core 0 */                  
   delay(500); 
 
+  // Utilities
   Serial.begin(115200);
   pinMode(led_pin, OUTPUT);
-
-  ESP32Serial1.begin(115200, SERIAL_8N1, 16, 17);
-  pinMode(EN_PIN, OUTPUT);
+  
+  // TMC2208 pins
+  pinMode(DIR_PIN, OUTPUT);
   ledcSetup(ledChannel, 0, 8);
   ledcAttachPin(STEP_PIN, ledChannel);
-  pinMode(DIR_PIN, OUTPUT);
+  pinMode(EN_PIN, OUTPUT);
+  ESP32Serial1.begin(115200, SERIAL_8N1, 16, 17);
   digitalWrite(EN_PIN, LOW); // Enable driver in hardware
-  digitalWrite(DIR_PIN, LOW);
+  digitalWrite(DIR_PIN, LOW); // Positive direction
 
   // Configure PCNT Unit 0
   pcnt_config_t pcnt_u0_ch0 = {
@@ -261,7 +270,7 @@ void setup(){
 
   // Initialize AS5048
   stepper_enc.beginCustom(5000000, 5);
-  stepper_enc.setZeroPosition(0);//*/
+  stepper_enc.setZeroPosition(0);
 
   // Configure driver
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
@@ -293,9 +302,6 @@ void loop(){
   // Sinusoidal Ramp using LedCPWM
   float step_freq_f = 0;
 
-  // Debugging AS5048
-  //debugAS5048A();
-
   for (int i = 0; i < 100; i++){
     if (i < 30){
       step_freq = i - 15;
@@ -314,9 +320,6 @@ void loop(){
     delay(100);
   }
   ledcWrite(ledChannel, 0);
-
-  // Debugging AS5048
-  //debugAS5048A();
 
   // Stop for 4 seconds
   for (int i = 0; i < 50; i++){
