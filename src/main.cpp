@@ -107,8 +107,8 @@ void update_stepper_angle_dg(){
 
 //ControlLoopTask: blinks an LED every 1000 ms
 void ControlLoopTask( void * pvParameters ){
-  Serial.print("Control Loop Task running on core ");
-  Serial.println(xPortGetCoreID());
+  //Serial.print("Control Loop Task running on core ");
+  //Serial.println(xPortGetCoreID());
   const TickType_t taskPeriod = 20; // ms
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
@@ -133,7 +133,7 @@ void ControlLoopTask( void * pvParameters ){
     stepper_last_angle_dg = stepper_angle_dg;
 
     // Send data as stream of ASCII characters
-    Serial.print(itoa(step_freq, step_freq_c, 10));
+    /*Serial.print(itoa(step_freq, step_freq_c, 10));
     Serial.print(" ");
     Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
     Serial.print(" ");
@@ -151,13 +151,11 @@ void ControlLoopTask( void * pvParameters ){
     Serial.println(st_enc_current_dg_c);//*/
 
     // Send data as binary packet: Serial.write( (uint8_t *) &x, sizeof( x ) );
-    /*uint8_t packet_size = 2;
-    Serial.write( (uint8_t *) &packet_size, sizeof( packet_size ) ); // Packet size
-    Serial.write( (uint8_t *) &step_freq, sizeof( step_freq ) ); // int16_t -> 2 bytes
-    Serial.write( (uint8_t *) &out_enc_pulses, sizeof( out_enc_pulses ) ); // int16_t -> 2 bytes
-    Serial.write( (uint8_t *) &out_sp_rpm, sizeof( out_sp_rpm ) ); // float -> 4 bytes
-    Serial.write( (uint8_t *) &stepper_angle_dg, sizeof( stepper_angle_dg ) ); // float -> 4 bytes
-    Serial.write( (uint8_t *) &stepper_sp_dgps, sizeof( stepper_sp_dgps ) ); // float -> 4 bytes //*/
+    Serial.write( (uint8_t *) &step_freq, 2 ); // int16_t -> 2 bytes
+    Serial.write( (uint8_t *) &out_enc_pulses, 2 ); // int16_t -> 2 bytes
+    Serial.write( (uint8_t *) &out_sp_rpm, 4); // float -> 4 bytes
+    Serial.write( (uint8_t *) &stepper_angle_dg, 4 ); // float -> 4 bytes
+    Serial.write( (uint8_t *) &stepper_sp_dgps, 4 ); // float -> 4 bytes //*/
 
     // End of communication
     digitalWrite(led_pin, LOW);
@@ -192,26 +190,12 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
   return high_task_wakeup == pdTRUE;
 }
 
-void setup(){
-  // Control Loop Task on core 0
-  xTaskCreatePinnedToCore(
-    ControlLoopTask,   /* Task function. */
-    "ControlLoopTask",     /* name of task. */
-    10000,       /* Stack size of task */
-    NULL,        /* parameter of the task */
-    1,           /* priority of the task */
-    &ControlLoopTaskHandle,      /* Task handle to keep track of created task */
-    0);          /* pin task to core 0 */                  
-  delay(500); 
-
-  // Utilities
-  Serial.begin(115200);
-  pinMode(led_pin, OUTPUT);
-  
+void setup(){  
   // TMC2208 pins
   pinMode(DIR_PIN, OUTPUT);
-  ledcSetup(ledChannel, 0, 8);
+  ledcSetup(ledChannel, 10, 8);
   ledcAttachPin(STEP_PIN, ledChannel);
+  ledcWriteTone(ledChannel, 0);
   pinMode(EN_PIN, OUTPUT);
   ESP32Serial1.begin(115200, SERIAL_8N1, 16, 17);
   digitalWrite(EN_PIN, LOW); // Enable driver in hardware
@@ -279,6 +263,24 @@ void setup(){
   driver.microsteps(4);     // Set microsteps to 1/16th
   driver.en_spreadCycle(false); // Toggle spreadCycle on TMC2208/2209/2224
   driver.pwm_autoscale(true);   // Needed for stealthChop
+
+  delay(100);
+  
+  // Utilities
+  Serial.begin(115200);
+  pinMode(led_pin, OUTPUT);
+
+  // Control Loop Task on core 0
+  xTaskCreatePinnedToCore(
+    ControlLoopTask,   /* Task function. */
+    "ControlLoopTask",     /* name of task. */
+    10000,       /* Stack size of task */
+    NULL,        /* parameter of the task */
+    1,           /* priority of the task */
+    &ControlLoopTaskHandle,      /* Task handle to keep track of created task */
+    0);          /* pin task to core 0 */ 
+
+  delay(500); 
 }
 
 void loop(){
