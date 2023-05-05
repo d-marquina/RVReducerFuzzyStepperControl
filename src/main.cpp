@@ -26,17 +26,42 @@ const int ledChannel = 0;
 int out_enc_A = 35;
 int out_enc_B = 34;
 int16_t out_enc_pulses = 0;
-float out_enc_pos = 0;
+float out_angle_dg = 0.0;
 
 // MCPWM Capture
 uint32_t cap_tick_0 = 0;
 uint32_t cap_tick_1 = 0;
 uint32_t cap_n_ticks = 0;
 float out_sp_rpm = 0;
+float out_sp_dgps = 0;
 bool out_sp_dir = false; // CCW, Positive
 static uint8_t out_enc_st_code = 0;
-static uint16_t out_enc_st_store=0;
+static uint16_t out_enc_st_store = 0;
 static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
+// Output Encoder Speed Filter
+// Butterworth 2nd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz BEST ONE
+const float out_sp_fil_num[] = {0.02008336, 0.04016673, 0.02008336, 0};
+const float out_sp_fil_den[] = {1,-1.56101807, 0.64135154, 0};//*/
+// Butterworth 3rd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz VERY ACCURATE, BAD DELAY
+/*const float out_sp_fil_num[] = {0.0028981946, 0.0086945839, 0.0086945839, 0.0028981946};
+const float out_sp_fil_den[] = {1,-2.3740947437, 1.9293556690, -0.5320753683};//*/
+// Chebyshev 2nd order - Direct Form I - Single Section - fs=100Hz - fc=8Hz 
+/*const float out_sp_fil_num[] = {0.04782289, 0.09564572, 0.04782289, 0};
+const float out_sp_fil_den[] = {1,-1.36920843, 0.58384110, 0};//*/
+// Chebyshev 2nd order - Direct Form I - Single Section - fs=100Hz - fc=3Hz 
+/*const float out_sp_fil_num[] = {0.0078843489, 0.0157686978, 0.0078843489, 0};
+const float out_sp_fil_den[] = {1,-1.7782553116, 0.8136408516, 0};//*/
+// Elliptic 2nd order - Direct Form I - Single Section - fs=100Hz - fc=3Hz 
+/*const float out_sp_fil_num[] = {0.0079745856, 0.0155899798, 0.0079745856, 0};
+const float out_sp_fil_den[] = {1,-1.7782629079, 0.8136504173, 0};//*/
+// Elliptic 3rd order - Direct Form I - Single Section - fs=100Hz - fc=8Hz 
+/*const float out_sp_fil_num[] = {0.00682342, 0.01801451, 0.01801451, 0.00682342};
+const float out_sp_fil_den[] = {1,-2.34211634, 2.00184822, -0.61005601};//*/
+// Maximally flat - Direct Form I - Single Section - fs=100Hz - fc=8Hz VERY ACCURATE, BAD DELAY
+/*const float out_sp_fil_num[] = {0.002898194594, 0.00869458355, 0.00869458355, 0.002898194594};
+const float out_sp_fil_den[] = {1, -2.374094725, 1.929355621, -0.5320753455};//*/
+float out_sp_unfiltered[] = {0, 0, 0, 0};
+float out_sp_filtered[] = {0, 0, 0, 0};
 
 // SPI Pins
 int8_t VSPI_MISO = 26;
@@ -45,6 +70,7 @@ int8_t VSPI_SS = 33;
 int8_t VSPI_MOSI = 32;
 AS5048A stepper_enc(VSPI, VSPI_SCLK, VSPI_MISO, VSPI_MOSI, VSPI_SS, false);
 float stepper_angle_dg = 0;
+float stepper_angle_offset_dg = 0;
 float stepper_sp_dgps = 0;
 float stepper_last_angle_dg = 0;
 float st_enc_current_dg = 0;
@@ -56,20 +82,90 @@ int16_t stepper_enc_raw = 0;//*/
 TaskHandle_t ControlLoopTaskHandle;
 
 // Custom Functions
+void set_stepper_angle_offset_dg(){
+  stepper_angle_offset_dg = stepper_enc.getRotationInDegrees();
+  return;
+}
+
+void update_out_angle_dg(){
+  pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
+  out_angle_dg = out_enc_pulses*0.03;
+  return;
+}
+
 void update_out_sp_rpm(){
   // Calculate
-  out_sp_rpm = 400000.0/cap_n_ticks; // Max: 5 RPM
+  if (cap_n_ticks == 0) { out_sp_dgps = 0; }
+  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 5 RPM
 
-  // Approximate to Zero
-  if(out_sp_rpm < 0.1){ // Threshold: 0.1 RPM
-    out_sp_rpm = 0;
-    return;
-  }
-
-  // Apply direction
-  if (out_sp_dir) out_sp_rpm = -1*out_sp_rpm;
+  // Approximate to Zero, Threshold: 0.25 RPM
+  if(out_sp_dgps < 0.25) { out_sp_dgps = 0.0; }
+  else if (out_sp_dir) { out_sp_dgps = -1*out_sp_dgps; }
 
   return;
+}
+
+void update_out_sp_dgps(){
+  // Calculate
+  if (cap_n_ticks == 0) { out_sp_dgps = 0; }
+  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 30 dps
+
+  // Approximate to Zero, Threshold: 0.4 deg/s
+  if(out_sp_dgps < 0.5) { out_sp_dgps = 0.0; }
+  else if (out_sp_dir) { out_sp_dgps = -1*out_sp_dgps; } 
+
+  // Filter Speed
+  out_sp_unfiltered[0] = out_sp_dgps;
+  // First Order
+  /*out_sp_filtered[0] = out_sp_unfiltered[0]*out_sp_fil_num[0] + out_sp_unfiltered[1]*out_sp_fil_num[1];
+  out_sp_filtered[0] = out_sp_filtered[0] - out_sp_filtered[1]*out_sp_fil_den[1];//*/
+  // Second Order
+  out_sp_filtered[0] = out_sp_unfiltered[0]*out_sp_fil_num[0] + out_sp_unfiltered[1]*out_sp_fil_num[1] + out_sp_unfiltered[2]*out_sp_fil_num[2];
+  out_sp_filtered[0] = out_sp_filtered[0] - out_sp_filtered[1]*out_sp_fil_den[1] - out_sp_filtered[2]*out_sp_fil_den[2];//*/
+  // Third Order
+  /*out_sp_filtered[0] = out_sp_unfiltered[0]*out_sp_fil_num[0] + out_sp_unfiltered[1]*out_sp_fil_num[1] + out_sp_unfiltered[2]*out_sp_fil_num[2] + out_sp_unfiltered[3]*out_sp_fil_num[3
+  ];
+  out_sp_filtered[0] = out_sp_filtered[0] - out_sp_filtered[1]*out_sp_fil_den[1] - out_sp_filtered[2]*out_sp_fil_den[2] - out_sp_filtered[3]*out_sp_fil_den[3];//*/
+
+  // Debug Output Speed Filter  
+  /*char out_sp_unfiltered_n_c[20]; 
+  char out_sp_filtered_n_c[20];
+  dtostrf(out_sp_unfiltered[0], 6, 3, out_sp_unfiltered_n_c);
+  dtostrf(out_sp_filtered[0], 6, 3, out_sp_filtered_n_c);
+  Serial.print(out_sp_unfiltered_n_c);
+  Serial.print(" ");
+  Serial.println(out_sp_filtered_n_c);//*/
+
+  // Update Vectors
+  out_sp_unfiltered[1] = out_sp_unfiltered[0];
+  out_sp_unfiltered[2] = out_sp_unfiltered[1];
+  //out_sp_unfiltered[3] = out_sp_unfiltered[2];
+  out_sp_filtered[1] = out_sp_filtered[0];
+  out_sp_filtered[2] = out_sp_filtered[1];
+  //out_sp_filtered[3] = out_sp_filtered[2];
+
+  return;
+}
+
+void update_stepper_angle_dg(){
+  st_enc_current_dg = stepper_enc.getRotationInDegrees();
+
+  if (st_enc_current_dg >= 0.0 && st_enc_current_dg <= 25.0 && st_enc_last_dg <= 360.0 && st_enc_last_dg >= 345.0 ) {
+    st_enc_full_rot++;
+  }
+  if (st_enc_last_dg >= 0.0 && st_enc_last_dg <= 25.0 && st_enc_current_dg <= 360.0 && st_enc_current_dg >= 345.0) {
+    st_enc_full_rot--;
+  }
+  stepper_angle_dg = st_enc_current_dg + st_enc_full_rot*360.0 - stepper_angle_offset_dg;
+  st_enc_last_dg  = st_enc_current_dg;
+
+  return;
+}
+
+void update_stepper_sp_dgps(float fs_Hz){
+  stepper_sp_dgps = (stepper_angle_dg - stepper_last_angle_dg)*fs_Hz; // multiplied by fs <> divided by Ts
+  if (abs(stepper_sp_dgps) <= 20) stepper_sp_dgps = 0;
+  stepper_last_angle_dg = stepper_angle_dg;
 }
 
 void debugAS5048A(){
@@ -90,68 +186,47 @@ void debugAS5048A(){
   return;
 }
 
-void update_stepper_angle_dg(){
-  st_enc_current_dg = stepper_enc.getRotationInDegrees();
-
-  if (st_enc_current_dg >= 0.0 && st_enc_current_dg <= 20.0 && st_enc_last_dg < 360.0 && st_enc_last_dg >= 340.0 ) {
-    st_enc_full_rot++;
-  }
-  if (st_enc_last_dg >= 0.0 && st_enc_last_dg <= 20.0 && st_enc_current_dg < 360.0 && st_enc_current_dg >= 340.0) {
-    st_enc_full_rot--;
-  }
-  stepper_angle_dg = st_enc_current_dg + st_enc_full_rot*360.0;
-  st_enc_last_dg  = st_enc_current_dg;
-
-  return;
-}
-
 //ControlLoopTask: blinks an LED every 1000 ms
 void ControlLoopTask( void * pvParameters ){
   //Serial.print("Control Loop Task running on core ");
   //Serial.println(xPortGetCoreID());
-  const TickType_t taskPeriod = 20; // ms
+  const TickType_t taskPeriod = 10; // ms
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   for(;;){
-    // Comms Measured Time: 1.1ms
     //digitalWrite(led_pin, !digitalRead(led_pin)); // Toggle
     digitalWrite(led_pin, HIGH);
 
     // Arrays for Streaming data
     char step_freq_c[20];
-    char out_enc_pulses_c[20];
-    char out_sp_rpm_c[20];
+    char out_angle_dg_c[20];
+    char out_sp_dgps_c[20];
     char stepper_angle_dg_c[20];
-    char st_enc_current_dg_c[20];
     char stepper_sp_dgps_c[20];
 
-    // Update data    
-    pcnt_get_counter_value(PCNT_UNIT_0, &out_enc_pulses);
-    update_out_sp_rpm();
+    // Update data
+    update_out_angle_dg();
+    update_out_sp_dgps();
     update_stepper_angle_dg();
-    stepper_sp_dgps = (stepper_angle_dg - stepper_last_angle_dg)*50;
-    stepper_last_angle_dg = stepper_angle_dg;
+    update_stepper_sp_dgps(100); // Ts=10ms -> fs = 100Hz
 
-    // Send data as stream of ASCII characters
-    /*Serial.print(itoa(step_freq, step_freq_c, 10));
+    // Send data as stream of ASCII characters, takes 250us
+    Serial.print(itoa(step_freq, step_freq_c, 10));
     Serial.print(" ");
-    Serial.print(itoa(out_enc_pulses, out_enc_pulses_c, 10));
+    dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
+    Serial.print(out_angle_dg_c);
     Serial.print(" ");
-    dtostrf(out_sp_rpm, 6, 3, out_sp_rpm_c);
-    Serial.print(out_sp_rpm_c);
+    dtostrf(out_sp_filtered[0], 6, 3, out_sp_dgps_c);
+    Serial.print(out_sp_dgps_c);
     Serial.print(" ");
     dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
     Serial.print(stepper_angle_dg_c);
     Serial.print(" ");
     dtostrf(stepper_sp_dgps, 6, 3, stepper_sp_dgps_c);
     Serial.println(stepper_sp_dgps_c);//*/
-    /*stepper_enc_raw = stepper_enc.getRawRotation();
-    Serial.println(itoa(stepper_enc_raw, stepper_angle_dg_c, 10));*/
-    /*dtostrf(st_enc_current_dg, 6, 3, st_enc_current_dg_c);
-    Serial.println(st_enc_current_dg_c);//*/
 
-    // Send data as binary packet: Serial.write( (uint8_t *) &x, sizeof( x ) );
-    Serial.write( (uint8_t *) &step_freq, 2 ); // int16_t -> 2 bytes
+    // Send data as binary packet, takes 260us, but too irregular
+    /*Serial.write( (uint8_t *) &step_freq, 2 ); // int16_t -> 2 bytes
     Serial.write( (uint8_t *) &out_enc_pulses, 2 ); // int16_t -> 2 bytes
     Serial.write( (uint8_t *) &out_sp_rpm, 4); // float -> 4 bytes
     Serial.write( (uint8_t *) &stepper_angle_dg, 4 ); // float -> 4 bytes
@@ -254,7 +329,8 @@ void setup(){
 
   // Initialize AS5048
   stepper_enc.beginCustom(5000000, 5);
-  stepper_enc.setZeroPosition(0);
+  set_stepper_angle_offset_dg();
+  //stepper_enc.setZeroPosition(0);
 
   // Configure driver
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
@@ -264,11 +340,11 @@ void setup(){
   driver.en_spreadCycle(false); // Toggle spreadCycle on TMC2208/2209/2224
   driver.pwm_autoscale(true);   // Needed for stealthChop
 
-  delay(100);
-  
   // Utilities
   Serial.begin(115200);
   pinMode(led_pin, OUTPUT);
+
+  delay(100);
 
   // Control Loop Task on core 0
   xTaskCreatePinnedToCore(
@@ -298,12 +374,10 @@ void loop(){
     }
     delay(100);
   }
-  ledcWrite(ledChannel, 0);
-  delay(4000);*/
+  ledcWrite(ledChannel, 0);//*/
 
   // Sinusoidal Ramp using LedCPWM
   float step_freq_f = 0;
-
   for (int i = 0; i < 100; i++){
     if (i < 30){
       step_freq = i - 15;
@@ -321,7 +395,7 @@ void loop(){
     }
     delay(100);
   }
-  ledcWrite(ledChannel, 0);
+  ledcWrite(ledChannel, 0);//*/
 
   // Stop for 4 seconds
   for (int i = 0; i < 50; i++){
@@ -329,9 +403,9 @@ void loop(){
     delay(80);
   }
   
-  digitalWrite(DIR_PIN, !digitalRead(DIR_PIN));
-  //stepper_dir = !stepper_dir;
-  //driver.shaft(stepper_dir);
+  //digitalWrite(DIR_PIN, !digitalRead(DIR_PIN)); // Update direction via pin
+  stepper_dir = !stepper_dir;
+  driver.shaft(stepper_dir); // Update direction via UART
 
 }
 
