@@ -39,8 +39,14 @@ static uint8_t out_enc_st_code = 0;
 static uint16_t out_enc_st_store = 0;
 static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 // Output Encoder Speed Filter
-// Butterworth 2nd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz BEST ONE
-const float out_sp_fil_num[] = {0.02008336, 0.04016673, 0.02008336, 0};
+// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=8Hz A BIT FASTER, LESS NOISY; NEW BEST ONE
+const float out_sp_fil_num[] = {0.01335920, 0.02671840, 0.01335920, 0};
+const float out_sp_fil_den[] = {1,-1.64745998, 0.70089678, 0};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=500Hz - fc=10Hz SLOWER BUT MOST ACCURATE
+/*const float out_sp_fil_num[] = {0.00362168, 0.00724336, 0.00362168, 0};
+const float out_sp_fil_den[] = {1,-1.82269492, 0.83718165, 0};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz OLD BEST ONE
+/*const float out_sp_fil_num[] = {0.02008336, 0.04016673, 0.02008336, 0};
 const float out_sp_fil_den[] = {1,-1.56101807, 0.64135154, 0};//*/
 // Butterworth 3rd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz VERY ACCURATE, BAD DELAY
 /*const float out_sp_fil_num[] = {0.0028981946, 0.0086945839, 0.0086945839, 0.0028981946};
@@ -60,6 +66,21 @@ const float out_sp_fil_den[] = {1,-2.34211634, 2.00184822, -0.61005601};//*/
 // Maximally flat - Direct Form I - Single Section - fs=100Hz - fc=8Hz VERY ACCURATE, BAD DELAY
 /*const float out_sp_fil_num[] = {0.002898194594, 0.00869458355, 0.00869458355, 0.002898194594};
 const float out_sp_fil_den[] = {1, -2.374094725, 1.929355621, -0.5320753455};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=500Hz - fc=5Hz TOO MUCH DELAY
+/*const float out_sp_fil_num[] = {0.00094469, 0.00188938, 0.00094469, 0};
+const float out_sp_fil_den[] = {1,-1.91119707, 0.91497583, 0};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=1000Hz - fc=10Hz TOO MUCH DELAY
+/*const float out_sp_fil_num[] = {0.00094469, 0.00188938, 0.00094469, 0};
+const float out_sp_fil_den[] = {1,-1.91119707, 0.91497583, 0};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=10Hz FAST BUT NOISY
+/*const float out_sp_fil_num[] = {0.02008336, 0.04016673, 0.02008336, 0};
+const float out_sp_fil_den[] = {1,-1.56101808, 0.64135154, 0};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=5Hz DELAY 
+/*const float out_sp_fil_num[] = {0.00554272, 0.01108543, 0.00554272, 0};
+const float out_sp_fil_den[] = {1,-1.77863177, 0.80080265, 0};//*/
+// Butterworth 2nd order - Direct Form I - Single Section - fs=1000Hz - fc=20Hz FAST BUT NOISY 
+/*const float out_sp_fil_num[] = {0.00362168, 0.00724336, 0.00362168, 0};
+const float out_sp_fil_den[] = {1,-1.82269492, 0.83718165, 0};//*/
 float out_sp_unfiltered[] = {0, 0, 0, 0};
 float out_sp_filtered[] = {0, 0, 0, 0};
 
@@ -76,7 +97,13 @@ float stepper_last_angle_dg = 0;
 float st_enc_current_dg = 0;
 float st_enc_last_dg = 0;
 int16_t st_enc_full_rot = 0;
-int16_t stepper_enc_raw = 0;//*/
+int16_t stepper_enc_raw = 0;
+// Stepper Encoder Speed Filter
+// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=8Hz 
+const float st_sp_fil_num[] = {0.01335920, 0.02671840, 0.01335920, 0};
+const float st_sp_fil_den[] = {1,-1.64745998, 0.70089678, 0};//*/
+float st_sp_unfiltered[] = {0, 0, 0, 0};
+float st_sp_filtered[] = {0, 0, 0, 0};
 
 // Multicore
 TaskHandle_t ControlLoopTaskHandle;
@@ -108,7 +135,7 @@ void update_out_sp_rpm(){
 void update_out_sp_dgps(){
   // Calculate
   if (cap_n_ticks == 0) { out_sp_dgps = 0; }
-  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 30 dps
+  else { out_sp_dgps = 2000000.0/cap_n_ticks; } // Max: 30 dps
 
   // Approximate to Zero, Threshold: 0.4 deg/s
   if(out_sp_dgps < 0.5) { out_sp_dgps = 0.0; }
@@ -165,6 +192,30 @@ void update_stepper_angle_dg(){
 void update_stepper_sp_dgps(float fs_Hz){
   stepper_sp_dgps = (stepper_angle_dg - stepper_last_angle_dg)*fs_Hz; // multiplied by fs <> divided by Ts
   if (abs(stepper_sp_dgps) <= 20) stepper_sp_dgps = 0;
+
+  // Filter
+  st_sp_unfiltered[0] = stepper_sp_dgps;  
+  // Second Order
+  st_sp_filtered[0] = st_sp_unfiltered[0]*st_sp_fil_num[0] + st_sp_unfiltered[1]*st_sp_fil_num[1] + st_sp_unfiltered[2]*st_sp_fil_num[2];
+  st_sp_filtered[0] = st_sp_filtered[0] - st_sp_filtered[1]*st_sp_fil_den[1] - st_sp_filtered[2]*st_sp_fil_den[2];//*/
+
+  // Debug Output Speed Filter  
+  char st_sp_unfiltered_n_c[20]; 
+  char st_sp_filtered_n_c[20];
+  dtostrf(st_sp_unfiltered[0], 6, 3, st_sp_unfiltered_n_c);
+  dtostrf(st_sp_filtered[0], 6, 3, st_sp_filtered_n_c);
+  Serial.print(st_sp_unfiltered_n_c);
+  Serial.print(" ");
+  Serial.println(st_sp_filtered_n_c);//*/
+
+  // Update Vectors
+  st_sp_unfiltered[1] = st_sp_unfiltered[0];
+  st_sp_unfiltered[2] = st_sp_unfiltered[1];
+  //st_sp_unfiltered[3] = st_sp_unfiltered[2];
+  st_sp_filtered[1] = st_sp_filtered[0];
+  st_sp_filtered[2] = st_sp_filtered[1];
+  //st_sp_filtered[3] = st_sp_filtered[2];
+
   stepper_last_angle_dg = stepper_angle_dg;
 }
 
@@ -190,7 +241,7 @@ void debugAS5048A(){
 void ControlLoopTask( void * pvParameters ){
   //Serial.print("Control Loop Task running on core ");
   //Serial.println(xPortGetCoreID());
-  const TickType_t taskPeriod = 10; // ms
+  const TickType_t taskPeriod = 5; // ms
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   for(;;){
@@ -208,10 +259,10 @@ void ControlLoopTask( void * pvParameters ){
     update_out_angle_dg();
     update_out_sp_dgps();
     update_stepper_angle_dg();
-    update_stepper_sp_dgps(100); // Ts=10ms -> fs = 100Hz
+    update_stepper_sp_dgps(200); // Ts=10ms -> fs = 100Hz
 
     // Send data as stream of ASCII characters, takes 250us
-    Serial.print(itoa(step_freq, step_freq_c, 10));
+    /*Serial.print(itoa(step_freq, step_freq_c, 10));
     Serial.print(" ");
     dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
     Serial.print(out_angle_dg_c);
