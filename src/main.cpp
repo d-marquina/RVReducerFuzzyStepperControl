@@ -200,7 +200,7 @@ void update_stepper_sp_dgps(float fs_Hz){
   st_sp_filtered[0] = st_sp_filtered[0] - st_sp_filtered[1]*st_sp_fil_den[1] - st_sp_filtered[2]*st_sp_fil_den[2];//*/
 
   // Debug Output Speed Filter  
-  char st_sp_unfiltered_n_c[20]; 
+  /*char st_sp_unfiltered_n_c[20]; 
   char st_sp_filtered_n_c[20];
   dtostrf(st_sp_unfiltered[0], 6, 3, st_sp_unfiltered_n_c);
   dtostrf(st_sp_filtered[0], 6, 3, st_sp_filtered_n_c);
@@ -259,10 +259,10 @@ void ControlLoopTask( void * pvParameters ){
     update_out_angle_dg();
     update_out_sp_dgps();
     update_stepper_angle_dg();
-    update_stepper_sp_dgps(200); // Ts=10ms -> fs = 100Hz
+    update_stepper_sp_dgps(200); // Ts=5ms -> fs = 200Hz
 
     // Send data as stream of ASCII characters, takes 250us
-    /*Serial.print(itoa(step_freq, step_freq_c, 10));
+    Serial.print(itoa(step_freq, step_freq_c, 10));
     Serial.print(" ");
     dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
     Serial.print(out_angle_dg_c);
@@ -273,7 +273,7 @@ void ControlLoopTask( void * pvParameters ){
     dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
     Serial.print(stepper_angle_dg_c);
     Serial.print(" ");
-    dtostrf(stepper_sp_dgps, 6, 3, stepper_sp_dgps_c);
+    dtostrf(st_sp_filtered[0], 6, 3, stepper_sp_dgps_c);
     Serial.println(stepper_sp_dgps_c);//*/
 
     // Send data as binary packet, takes 260us, but too irregular
