@@ -8,6 +8,9 @@ Arduino Espressiff version: 2.0.6
 #include "driver/mcpwm.h"
 #include <AS5048A.h>
 
+int led_pin = 19;
+int command_msg = 0;
+
 HardwareSerial ESP32Serial1(1);
 #define DIR_PIN 2                              // Direction
 #define STEP_PIN 4                             // Step
@@ -15,8 +18,6 @@ HardwareSerial ESP32Serial1(1);
 #define R_SENSE 0.11f                          // SilentStepStick series use 0.11
 TMC2208Stepper driver(&ESP32Serial1, R_SENSE); // Hardware Serial
 bool stepper_dir = false;                     // Positive
-
-int led_pin = 19;
 
 // setting PWM properties
 int16_t step_freq = 0; // 2kHz
@@ -123,7 +124,7 @@ void update_out_angle_dg(){
 void update_out_sp_rpm(){
   // Calculate
   if (cap_n_ticks == 0) { out_sp_dgps = 0; }
-  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 5 RPM
+  else { out_sp_dgps = 400000.0/cap_n_ticks; } // Max: 5 RPM
 
   // Approximate to Zero, Threshold: 0.25 RPM
   if(out_sp_dgps < 0.25) { out_sp_dgps = 0.0; }
@@ -135,7 +136,7 @@ void update_out_sp_rpm(){
 void update_out_sp_dgps(){
   // Calculate
   if (cap_n_ticks == 0) { out_sp_dgps = 0; }
-  else { out_sp_dgps = 2000000.0/cap_n_ticks; } // Max: 30 dps
+  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 30 dps
 
   // Approximate to Zero, Threshold: 0.4 deg/s
   if(out_sp_dgps < 0.5) { out_sp_dgps = 0.0; }
@@ -411,6 +412,41 @@ void setup(){
 }
 
 void loop(){
+  if (Serial.available() >0){
+    command_msg = Serial.read();
+  }
+
+  // Sinusoidal Ramp using LedCPWM
+  if (command_msg == 53){ //ASCII for 5
+    float step_freq_f = 0;
+    for (int i = 0; i < 100; i++){
+      if (i < 30){
+        step_freq = i - 15;
+        step_freq_f = 0.104719333 * step_freq;
+        step_freq = int(1000 * sin(step_freq_f)) + 1000;
+        ledcWriteTone(ledChannel, step_freq);
+      } else if (i < 70){
+        step_freq = 2000;
+        ledcWriteTone(ledChannel, step_freq);
+      } else {
+        step_freq = i + 5;
+        step_freq_f = 0.104719333 * step_freq;
+        step_freq = int(1000 * sin(step_freq_f)) + 1000;
+        ledcWriteTone(ledChannel, step_freq);
+      }
+      delay(100);
+    }
+    ledcWrite(ledChannel, 0);//*/
+
+    // Stop for 4 seconds
+    for (int i = 0; i < 50; i++){
+      step_freq = 0;
+      delay(80);
+    }
+
+    command_msg = 0;
+  }  
+
   // Linear Ramp using LedCPWM
   /*for (int i = 0; i < 100; i++){
     if (i < 25){
@@ -427,8 +463,7 @@ void loop(){
   }
   ledcWrite(ledChannel, 0);//*/
 
-  // Sinusoidal Ramp using LedCPWM
-  float step_freq_f = 0;
+  /*float step_freq_f = 0;
   for (int i = 0; i < 100; i++){
     if (i < 30){
       step_freq = i - 15;
@@ -449,14 +484,13 @@ void loop(){
   ledcWrite(ledChannel, 0);//*/
 
   // Stop for 4 seconds
-  for (int i = 0; i < 50; i++){
+  /*for (int i = 0; i < 50; i++){
     step_freq = 0;
     delay(80);
-  }
+  }//*/
   
-  //digitalWrite(DIR_PIN, !digitalRead(DIR_PIN)); // Update direction via pin
-  stepper_dir = !stepper_dir;
-  driver.shaft(stepper_dir); // Update direction via UART
+  //stepper_dir = !stepper_dir;
+  //driver.shaft(stepper_dir); // Update direction via UART
 
 }
 
