@@ -9,7 +9,6 @@ Arduino Espressiff version: 2.0.6
 #include <AS5048A.h>
 
 int led_pin = 19;
-int command_msg = 0;
 
 HardwareSerial ESP32Serial1(1);
 #define DIR_PIN 2                              // Direction
@@ -17,7 +16,7 @@ HardwareSerial ESP32Serial1(1);
 #define EN_PIN 5                               // Enable
 #define R_SENSE 0.11f                          // SilentStepStick series use 0.11
 TMC2208Stepper driver(&ESP32Serial1, R_SENSE); // Hardware Serial
-bool stepper_dir = false;                     // Positive
+bool stepper_dir = false;                      // CCW, Positive
 
 // setting PWM properties
 int16_t step_freq = 0; // 2kHz
@@ -43,45 +42,9 @@ static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 // Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=8Hz A BIT FASTER, LESS NOISY; NEW BEST ONE
 const float out_sp_fil_num[] = {0.01335920, 0.02671840, 0.01335920, 0};
 const float out_sp_fil_den[] = {1,-1.64745998, 0.70089678, 0};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=500Hz - fc=10Hz SLOWER BUT MOST ACCURATE
-/*const float out_sp_fil_num[] = {0.00362168, 0.00724336, 0.00362168, 0};
-const float out_sp_fil_den[] = {1,-1.82269492, 0.83718165, 0};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz OLD BEST ONE
-/*const float out_sp_fil_num[] = {0.02008336, 0.04016673, 0.02008336, 0};
-const float out_sp_fil_den[] = {1,-1.56101807, 0.64135154, 0};//*/
-// Butterworth 3rd order - Direct Form I - Single Section - fs=100Hz - fc=5Hz VERY ACCURATE, BAD DELAY
-/*const float out_sp_fil_num[] = {0.0028981946, 0.0086945839, 0.0086945839, 0.0028981946};
-const float out_sp_fil_den[] = {1,-2.3740947437, 1.9293556690, -0.5320753683};//*/
-// Chebyshev 2nd order - Direct Form I - Single Section - fs=100Hz - fc=8Hz 
-/*const float out_sp_fil_num[] = {0.04782289, 0.09564572, 0.04782289, 0};
-const float out_sp_fil_den[] = {1,-1.36920843, 0.58384110, 0};//*/
-// Chebyshev 2nd order - Direct Form I - Single Section - fs=100Hz - fc=3Hz 
-/*const float out_sp_fil_num[] = {0.0078843489, 0.0157686978, 0.0078843489, 0};
-const float out_sp_fil_den[] = {1,-1.7782553116, 0.8136408516, 0};//*/
-// Elliptic 2nd order - Direct Form I - Single Section - fs=100Hz - fc=3Hz 
-/*const float out_sp_fil_num[] = {0.0079745856, 0.0155899798, 0.0079745856, 0};
-const float out_sp_fil_den[] = {1,-1.7782629079, 0.8136504173, 0};//*/
-// Elliptic 3rd order - Direct Form I - Single Section - fs=100Hz - fc=8Hz 
-/*const float out_sp_fil_num[] = {0.00682342, 0.01801451, 0.01801451, 0.00682342};
-const float out_sp_fil_den[] = {1,-2.34211634, 2.00184822, -0.61005601};//*/
-// Maximally flat - Direct Form I - Single Section - fs=100Hz - fc=8Hz VERY ACCURATE, BAD DELAY
-/*const float out_sp_fil_num[] = {0.002898194594, 0.00869458355, 0.00869458355, 0.002898194594};
-const float out_sp_fil_den[] = {1, -2.374094725, 1.929355621, -0.5320753455};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=500Hz - fc=5Hz TOO MUCH DELAY
-/*const float out_sp_fil_num[] = {0.00094469, 0.00188938, 0.00094469, 0};
-const float out_sp_fil_den[] = {1,-1.91119707, 0.91497583, 0};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=1000Hz - fc=10Hz TOO MUCH DELAY
-/*const float out_sp_fil_num[] = {0.00094469, 0.00188938, 0.00094469, 0};
-const float out_sp_fil_den[] = {1,-1.91119707, 0.91497583, 0};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=10Hz FAST BUT NOISY
-/*const float out_sp_fil_num[] = {0.02008336, 0.04016673, 0.02008336, 0};
-const float out_sp_fil_den[] = {1,-1.56101808, 0.64135154, 0};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=5Hz DELAY 
-/*const float out_sp_fil_num[] = {0.00554272, 0.01108543, 0.00554272, 0};
+/*// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=5Hz DELAY 
+const float out_sp_fil_num[] = {0.00554272, 0.01108543, 0.00554272, 0};
 const float out_sp_fil_den[] = {1,-1.77863177, 0.80080265, 0};//*/
-// Butterworth 2nd order - Direct Form I - Single Section - fs=1000Hz - fc=20Hz FAST BUT NOISY 
-/*const float out_sp_fil_num[] = {0.00362168, 0.00724336, 0.00362168, 0};
-const float out_sp_fil_den[] = {1,-1.82269492, 0.83718165, 0};//*/
 float out_sp_unfiltered[] = {0, 0, 0, 0};
 float out_sp_filtered[] = {0, 0, 0, 0};
 
@@ -108,6 +71,39 @@ float st_sp_filtered[] = {0, 0, 0, 0};
 
 // Multicore
 TaskHandle_t ControlLoopTaskHandle;
+
+// Mode selector
+// - Open Loop: 0
+// - Debug Output Speed Filter: 1
+// - Debug Stepper Speed Filter: 2
+// - PID mode: 4
+int mode_selector = 0;
+
+// Commands (ASCII - String)
+// - 49 ('1'): Open Loop - Extenal signal
+// - 50 ('2'): Open Loop - Linear Ramp
+// - 51 ('3'): Open Loop - Sinusoidal
+// - 52 ('4'): PID - Step values
+// - 53 ('5'): PID - Linear ramp
+// - 54 ('6'): PID - Sinusoidal
+int command_msg = 0;
+
+// PID 
+//int pid_en_flag = 0;
+float pid_set_point = 0;
+float pid_err[] = {0, 0, 0};
+float pid_u[] = {0, 0, 0};
+/*// Output Speed Control
+float pid_num[] = {12.19, -11.2, 2.57}; // Works Ok
+//float pid_num[] = {100.8, -160, 63.52};// Faster, without noticeable overshoot
+float pid_den[] = {1, 0, -1};//*/
+/*// Stepper Speed Control
+float pid_num[] = {0.3951, -0.3282, 0};
+float pid_den[] = {1, -1, 0};//*/
+// Output Angle Control
+//float pid_num[] = {1692, -1649, 0};// Good One
+float pid_num[] = {3290, -3163, 0};// Faster One
+float pid_den[] = {1, -1, 0};//*/
 
 // Custom Functions
 void set_stepper_angle_offset_dg(){
@@ -136,41 +132,34 @@ void update_out_sp_rpm(){
 void update_out_sp_dgps(){
   // Calculate
   if (cap_n_ticks == 0) { out_sp_dgps = 0; }
-  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 30 dps
+  else { out_sp_dgps = 2400000.0/cap_n_ticks; } // Max: 30 dgps
 
-  // Approximate to Zero, Threshold: 0.4 deg/s
+  // Approximate to Zero, Threshold: 0.5 deg/s
   if(out_sp_dgps < 0.5) { out_sp_dgps = 0.0; }
   else if (out_sp_dir) { out_sp_dgps = -1*out_sp_dgps; } 
 
   // Filter Speed
   out_sp_unfiltered[0] = out_sp_dgps;
-  // First Order
-  /*out_sp_filtered[0] = out_sp_unfiltered[0]*out_sp_fil_num[0] + out_sp_unfiltered[1]*out_sp_fil_num[1];
-  out_sp_filtered[0] = out_sp_filtered[0] - out_sp_filtered[1]*out_sp_fil_den[1];//*/
   // Second Order
   out_sp_filtered[0] = out_sp_unfiltered[0]*out_sp_fil_num[0] + out_sp_unfiltered[1]*out_sp_fil_num[1] + out_sp_unfiltered[2]*out_sp_fil_num[2];
   out_sp_filtered[0] = out_sp_filtered[0] - out_sp_filtered[1]*out_sp_fil_den[1] - out_sp_filtered[2]*out_sp_fil_den[2];//*/
-  // Third Order
-  /*out_sp_filtered[0] = out_sp_unfiltered[0]*out_sp_fil_num[0] + out_sp_unfiltered[1]*out_sp_fil_num[1] + out_sp_unfiltered[2]*out_sp_fil_num[2] + out_sp_unfiltered[3]*out_sp_fil_num[3
-  ];
-  out_sp_filtered[0] = out_sp_filtered[0] - out_sp_filtered[1]*out_sp_fil_den[1] - out_sp_filtered[2]*out_sp_fil_den[2] - out_sp_filtered[3]*out_sp_fil_den[3];//*/
 
   // Debug Output Speed Filter  
-  /*char out_sp_unfiltered_n_c[20]; 
-  char out_sp_filtered_n_c[20];
-  dtostrf(out_sp_unfiltered[0], 6, 3, out_sp_unfiltered_n_c);
-  dtostrf(out_sp_filtered[0], 6, 3, out_sp_filtered_n_c);
-  Serial.print(out_sp_unfiltered_n_c);
-  Serial.print(" ");
-  Serial.println(out_sp_filtered_n_c);//*/
+  if (mode_selector == 1){
+    char out_sp_unfiltered_n_c[20]; 
+    char out_sp_filtered_n_c[20];
+    dtostrf(out_sp_unfiltered[0], 6, 3, out_sp_unfiltered_n_c);
+    dtostrf(out_sp_filtered[0], 6, 3, out_sp_filtered_n_c);
+    Serial.print(out_sp_unfiltered_n_c);
+    Serial.print(" ");
+    Serial.println(out_sp_filtered_n_c);//*/
+  }  
 
   // Update Vectors
   out_sp_unfiltered[1] = out_sp_unfiltered[0];
   out_sp_unfiltered[2] = out_sp_unfiltered[1];
-  //out_sp_unfiltered[3] = out_sp_unfiltered[2];
   out_sp_filtered[1] = out_sp_filtered[0];
   out_sp_filtered[2] = out_sp_filtered[1];
-  //out_sp_filtered[3] = out_sp_filtered[2];
 
   return;
 }
@@ -200,22 +189,22 @@ void update_stepper_sp_dgps(float fs_Hz){
   st_sp_filtered[0] = st_sp_unfiltered[0]*st_sp_fil_num[0] + st_sp_unfiltered[1]*st_sp_fil_num[1] + st_sp_unfiltered[2]*st_sp_fil_num[2];
   st_sp_filtered[0] = st_sp_filtered[0] - st_sp_filtered[1]*st_sp_fil_den[1] - st_sp_filtered[2]*st_sp_fil_den[2];//*/
 
-  // Debug Output Speed Filter  
-  /*char st_sp_unfiltered_n_c[20]; 
-  char st_sp_filtered_n_c[20];
-  dtostrf(st_sp_unfiltered[0], 6, 3, st_sp_unfiltered_n_c);
-  dtostrf(st_sp_filtered[0], 6, 3, st_sp_filtered_n_c);
-  Serial.print(st_sp_unfiltered_n_c);
-  Serial.print(" ");
-  Serial.println(st_sp_filtered_n_c);//*/
+  // Debug Stepper Speed Filter
+  if (mode_selector == 2){
+    char st_sp_unfiltered_n_c[20]; 
+    char st_sp_filtered_n_c[20];
+    dtostrf(st_sp_unfiltered[0], 6, 3, st_sp_unfiltered_n_c);
+    dtostrf(st_sp_filtered[0], 6, 3, st_sp_filtered_n_c);
+    Serial.print(st_sp_unfiltered_n_c);
+    Serial.print(" ");
+    Serial.println(st_sp_filtered_n_c);//*/
+  }  
 
   // Update Vectors
   st_sp_unfiltered[1] = st_sp_unfiltered[0];
   st_sp_unfiltered[2] = st_sp_unfiltered[1];
-  //st_sp_unfiltered[3] = st_sp_unfiltered[2];
   st_sp_filtered[1] = st_sp_filtered[0];
   st_sp_filtered[2] = st_sp_filtered[1];
-  //st_sp_filtered[3] = st_sp_filtered[2];
 
   stepper_last_angle_dg = stepper_angle_dg;
 }
@@ -246,7 +235,6 @@ void ControlLoopTask( void * pvParameters ){
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
   for(;;){
-    //digitalWrite(led_pin, !digitalRead(led_pin)); // Toggle
     digitalWrite(led_pin, HIGH);
 
     // Arrays for Streaming data
@@ -255,36 +243,96 @@ void ControlLoopTask( void * pvParameters ){
     char out_sp_dgps_c[20];
     char stepper_angle_dg_c[20];
     char stepper_sp_dgps_c[20];
+    char set_point_c[20];
 
-    // Update data
+    // Update sensor data
     update_out_angle_dg();
     update_out_sp_dgps();
     update_stepper_angle_dg();
-    update_stepper_sp_dgps(200); // Ts=5ms -> fs = 200Hz
+    update_stepper_sp_dgps(200); // Ts=5ms -> fs = 200Hz   
 
-    // Send data as stream of ASCII characters, takes 250us
-    Serial.print(itoa(step_freq, step_freq_c, 10));
-    Serial.print(" ");
-    dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
-    Serial.print(out_angle_dg_c);
-    Serial.print(" ");
-    dtostrf(out_sp_filtered[0], 6, 3, out_sp_dgps_c);
-    Serial.print(out_sp_dgps_c);
-    Serial.print(" ");
-    dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
-    Serial.print(stepper_angle_dg_c);
-    Serial.print(" ");
-    dtostrf(st_sp_filtered[0], 6, 3, stepper_sp_dgps_c);
-    Serial.println(stepper_sp_dgps_c);//*/
+    // Open loop
+    if (mode_selector == 0){
+      // Send data as stream of ASCII characters, takes 250us
+      Serial.print(itoa(step_freq, step_freq_c, 10));
+      Serial.print(" ");
+      dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
+      Serial.print(out_angle_dg_c);
+      Serial.print(" ");   
+      dtostrf(out_sp_filtered[0], 6, 3, out_sp_dgps_c);
+      Serial.print(out_sp_dgps_c);
+      Serial.print(" ");
+      dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
+      Serial.print(stepper_angle_dg_c);
+      Serial.print(" ");
+      dtostrf(st_sp_filtered[0], 6, 3, stepper_sp_dgps_c);
+      Serial.println(stepper_sp_dgps_c);//*/
+    }     
 
-    // Send data as binary packet, takes 260us, but too irregular
-    /*Serial.write( (uint8_t *) &step_freq, 2 ); // int16_t -> 2 bytes
-    Serial.write( (uint8_t *) &out_enc_pulses, 2 ); // int16_t -> 2 bytes
-    Serial.write( (uint8_t *) &out_sp_rpm, 4); // float -> 4 bytes
-    Serial.write( (uint8_t *) &stepper_angle_dg, 4 ); // float -> 4 bytes
-    Serial.write( (uint8_t *) &stepper_sp_dgps, 4 ); // float -> 4 bytes //*/
+    // PID loop
+    if (mode_selector == 4){
+      //pid_err[0] = pid_set_point - out_sp_filtered[0];
+      //pid_err[0] = pid_set_point - st_sp_filtered[0];
+      pid_err[0] = pid_set_point - out_angle_dg;
+      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
+      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];
 
-    // End of communication
+      // Limit acceleration (20 - no load)
+      if (abs(pid_u[0]) > step_freq + 5){
+        int pid_u_sign;
+        if (pid_u[0] >= 0){
+          pid_u_sign = 1;
+        } else {
+          pid_u_sign = -1;
+        }
+        pid_u[0] = pid_u_sign*(step_freq + 5);
+      }
+
+      // Control signal saturation (2800 - no load)
+      if (pid_u[0] > 1500){
+        pid_u[0] = 1500;
+      } else if (pid_u[0] < -1500){
+        pid_u[0] = -1500;
+      }
+
+      // Set control signal
+      step_freq = int(pid_u[0]);
+      if (step_freq >= 0){
+        stepper_dir = false;
+      } else {
+        stepper_dir = true;
+        step_freq = step_freq*-1;
+      }
+      driver.shaft(stepper_dir);
+      ledcWriteTone(ledChannel, step_freq);
+
+      // Update data
+      pid_err[1] = pid_err[0];
+      pid_err[2] = pid_err[1];
+      pid_u[1] = pid_u[0];
+      pid_u[2] = pid_u[1];//*/
+
+      // Send data as stream of ASCII characters, takes 250us
+      Serial.print(itoa(step_freq, step_freq_c, 10));
+      Serial.print(" ");
+      dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
+      Serial.print(out_angle_dg_c);
+      Serial.print(" ");
+      //dtostrf(out_sp_dgps, 6, 3, out_sp_dgps_c);    
+      dtostrf(out_sp_filtered[0], 6, 3, out_sp_dgps_c);
+      Serial.print(out_sp_dgps_c);
+      Serial.print(" ");
+      dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
+      Serial.print(stepper_angle_dg_c);
+      Serial.print(" ");
+      dtostrf(st_sp_filtered[0], 6, 3, stepper_sp_dgps_c);
+      Serial.print(stepper_sp_dgps_c);
+      Serial.print(" ");
+      dtostrf(pid_set_point, 6, 3, set_point_c);
+      Serial.println(set_point_c);//*/
+    }
+
+    // End of loop
     digitalWrite(led_pin, LOW);
 
     vTaskDelayUntil(&xLastWakeTime, taskPeriod);
@@ -301,8 +349,8 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
   if (digitalRead(out_enc_B)) out_enc_st_code |= 0x02;
   out_enc_st_code &= 0x0f;
 
-   // If valid then store as 16 bit data.
-   if (out_enc_st_table[out_enc_st_code] ) {
+  // If valid then store as 16 bit data.
+  if (out_enc_st_table[out_enc_st_code] ) {
     out_enc_st_store <<= 4;
     out_enc_st_store |= out_enc_st_code;
     if ((out_enc_st_store&0xff)==0x2b) out_sp_dir = true; // CW, negative
@@ -312,7 +360,7 @@ static bool mcpwm_isr_function(mcpwm_unit_t mcpwm, mcpwm_capture_channel_id_t ca
     cap_tick_1 = edata->cap_value;
     cap_n_ticks = cap_tick_1 - cap_tick_0;
     cap_tick_0 = edata->cap_value;//*/
-   }
+  }
   
   return high_task_wakeup == pdTRUE;
 }
@@ -387,10 +435,11 @@ void setup(){
   // Configure driver
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.toff(5);           // Enables driver in software
-  driver.rms_current(1000); // Set motor RMS current
-  driver.microsteps(4);     // Set microsteps to 1/16th
+  driver.rms_current(1500); // Set motor RMS current
+  driver.microsteps(4);     // Set microsteps to 1/4th
   driver.en_spreadCycle(false); // Toggle spreadCycle on TMC2208/2209/2224
   driver.pwm_autoscale(true);   // Needed for stealthChop
+  driver.shaft(stepper_dir);
 
   // Utilities
   Serial.begin(115200);
@@ -416,8 +465,38 @@ void loop(){
     command_msg = Serial.read();
   }
 
-  // Sinusoidal Ramp using LedCPWM
-  if (command_msg == 53){ //ASCII for 5
+  // Open Loop - External signal (49 - '1')
+  if (command_msg == 49){
+    mode_selector = 0;
+    command_msg = 0;
+  }
+
+  // Open Loop - Linear Ramp (50 - '2')
+  if (command_msg == 50){
+    mode_selector = 0;
+    command_msg = 0;
+    // Linear Ramp using LedCPWM
+    for (int i = 0; i < 100; i++){
+      if (i < 25){
+        step_freq = 2000*i/25;
+        ledcWriteTone(ledChannel, step_freq);
+      } else if (i < 75){
+        step_freq = 2000;
+        ledcWriteTone(ledChannel, step_freq);
+      } else {
+        step_freq = 2000*(100-i)/25;
+        ledcWriteTone(ledChannel, step_freq);
+      }
+      delay(100);
+    }
+    ledcWrite(ledChannel, 0);
+  }
+  
+  // Open Loop - Sinusoidal (51 - '3')
+  if (command_msg == 51){ 
+    mode_selector = 0;
+    command_msg = 0;
+    // Sinusoidal Ramp using LedCPWM
     float step_freq_f = 0;
     for (int i = 0; i < 100; i++){
       if (i < 30){
@@ -443,54 +522,82 @@ void loop(){
       step_freq = 0;
       delay(80);
     }
+  }
 
+  // PID - Step values (52 - '4')
+  if (command_msg == 52){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
     command_msg = 0;
+
+    // Step values
+    pid_set_point = 45;
+    delay(8000);
+    pid_set_point = -15;
+    delay(6000);
+    pid_set_point = 15;
+    delay(7000);
+    pid_set_point = -45;
+    delay(6000);
+    pid_set_point = 0;//*/
+  }
+
+  // PID - Linear Ramp (53 - '5')
+  if (command_msg == 53){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+
+    // Linear Ramp
+    float max_set_point = 240;
+    pid_set_point = 0;
+    for (int i = 0; i < 100; i++){
+      if (i < 25){
+        pid_set_point = max_set_point*i/25.0;
+      } else if (i < 75){
+        pid_set_point = max_set_point;
+      } else {
+        pid_set_point = max_set_point*(100-i)/25.0;
+      }
+      delay(100);
+    }
+    pid_set_point = 0;//*/
   }  
 
-  // Linear Ramp using LedCPWM
-  /*for (int i = 0; i < 100; i++){
-    if (i < 25){
-      step_freq = 2000*i/25;
-      ledcWriteTone(ledChannel, step_freq);
-    } else if (i < 75){
-      step_freq = 2000;
-      ledcWriteTone(ledChannel, step_freq);
-    } else {
-      step_freq = 2000*(100-i)/25;
-      ledcWriteTone(ledChannel, step_freq);
-    }
-    delay(100);
-  }
-  ledcWrite(ledChannel, 0);//*/
+  // PID - Sinusoidal (54 - '6')
+  if (command_msg == 54){ // ASCII for 6
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;    
 
-  /*float step_freq_f = 0;
-  for (int i = 0; i < 100; i++){
-    if (i < 30){
-      step_freq = i - 15;
-      step_freq_f = 0.104719333 * step_freq;
-      step_freq = int(1000 * sin(step_freq_f)) + 1000;
-      ledcWriteTone(ledChannel, step_freq);
-    } else if (i < 70){
-      step_freq = 2000;
-      ledcWriteTone(ledChannel, step_freq);
-    } else {
-      step_freq = i + 5;
-      step_freq_f = 0.104719333 * step_freq;
-      step_freq = int(1000 * sin(step_freq_f)) + 1000;
-      ledcWriteTone(ledChannel, step_freq);
+    // Sinusoidal signal
+    // - sin(k*i + fi) -> k = 2*pi/10*T (10 - delay(100))
+    float sin_angle = 0;
+    for (int i = 0; i < 150; i++){
+      sin_angle = 0.1047 * i - 1.570796; // 6s - 0.1047
+      pid_set_point = 30 * sin(sin_angle) + 30;
+      /*if (i < 30){
+        sin_angle = 0.104719333 * i - 1.570796;
+        pid_set_point = 30 * sin(sin_angle) + 30;
+      } else if (i < 70){
+        pid_set_point = 60;
+      } else {
+        sin_angle = 0.104719333 * i + 0.5235;
+        pid_set_point = 30 * sin(sin_angle) + 30;
+      }*/
+      delay(100);
     }
-    delay(100);
+    pid_set_point = 0;//*/
   }
-  ledcWrite(ledChannel, 0);//*/
-
-  // Stop for 4 seconds
-  /*for (int i = 0; i < 50; i++){
-    step_freq = 0;
-    delay(80);
-  }//*/
-  
-  //stepper_dir = !stepper_dir;
-  //driver.shaft(stepper_dir); // Update direction via UART
 
 }
 
