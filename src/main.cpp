@@ -475,20 +475,22 @@ void loop(){
   if (command_msg == 50){
     mode_selector = 0;
     command_msg = 0;
-    // Linear Ramp using LedCPWM
+    // Linear Ramp using LedCPWM    
+    int max_set_point = 2000;
     for (int i = 0; i < 100; i++){
       if (i < 25){
-        step_freq = 2000*i/25;
+        step_freq = max_set_point*i/25;
         ledcWriteTone(ledChannel, step_freq);
       } else if (i < 75){
-        step_freq = 2000;
+        step_freq = max_set_point;
         ledcWriteTone(ledChannel, step_freq);
       } else {
-        step_freq = 2000*(100-i)/25;
+        step_freq = max_set_point*(100-i)/25;
         ledcWriteTone(ledChannel, step_freq);
       }
       delay(100);
     }
+    step_freq = 0;
     ledcWrite(ledChannel, 0);
   }
   
@@ -600,4 +602,3 @@ void loop(){
   }
 
 }
-
