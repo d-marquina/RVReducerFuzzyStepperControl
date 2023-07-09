@@ -436,7 +436,7 @@ void setup(){
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.toff(5);           // Enables driver in software
   driver.rms_current(1500); // Set motor RMS current
-  driver.microsteps(4);     // Set microsteps to 1/16th
+  driver.microsteps(4);     // Set microsteps to 1/4th
   driver.en_spreadCycle(false); // Toggle spreadCycle on TMC2208/2209/2224
   driver.pwm_autoscale(true);   // Needed for stealthChop
   driver.shaft(stepper_dir);
