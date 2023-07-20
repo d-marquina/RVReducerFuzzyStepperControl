@@ -88,21 +88,14 @@ int mode_selector = 0;
 // - 54 ('6'): PID - Sinusoidal
 int command_msg = 0;
 
-// PID 
-//int pid_en_flag = 0;
+// PID
 float pid_set_point = 0;
 float pid_err[] = {0, 0, 0};
 float pid_u[] = {0, 0, 0};
-/*// Output Speed Control
-float pid_num[] = {12.19, -11.2, 2.57}; // Works Ok
-//float pid_num[] = {100.8, -160, 63.52};// Faster, without noticeable overshoot
-float pid_den[] = {1, 0, -1};//*/
-/*// Stepper Speed Control
-float pid_num[] = {0.3951, -0.3282, 0};
-float pid_den[] = {1, -1, 0};//*/
 // Output Angle Control
-//float pid_num[] = {1692, -1649, 0};// Good One
-float pid_num[] = {3290, -3163, 0};// Faster One
+//float pid_num[] = {141.2, -139.8, 0}; // Too crispy
+//float pid_num[] = {83.45, -83, 0}; // Sill, too crispy
+float pid_num[] = {137.6, -1.955, -135.6}; //
 float pid_den[] = {1, -1, 0};//*/
 
 // Custom Functions
@@ -271,28 +264,34 @@ void ControlLoopTask( void * pvParameters ){
 
     // PID loop
     if (mode_selector == 4){
-      //pid_err[0] = pid_set_point - out_sp_filtered[0];
-      //pid_err[0] = pid_set_point - st_sp_filtered[0];
       pid_err[0] = pid_set_point - out_angle_dg;
       pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
       pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];
 
-      // Limit acceleration (20 - no load)
-      if (abs(pid_u[0]) > step_freq + 5){
+      // Limit acceleration (1 - no load)
+      if (abs(pid_u[0]) >= step_freq + 2){
         int pid_u_sign;
         if (pid_u[0] >= 0){
           pid_u_sign = 1;
         } else {
           pid_u_sign = -1;
         }
-        pid_u[0] = pid_u_sign*(step_freq + 5);
-      }
+        pid_u[0] = pid_u_sign*(step_freq + 2);
+      } else if (abs(pid_u[0]) <= step_freq - 2){
+        int pid_u_sign;
+        if (pid_u[0] >= 0){
+          pid_u_sign = 1;
+        } else {
+          pid_u_sign = -1;
+        }
+        pid_u[0] = pid_u_sign*(step_freq - 2);
+      }//*/
 
-      // Control signal saturation (2800 - no load)
-      if (pid_u[0] > 1500){
-        pid_u[0] = 1500;
-      } else if (pid_u[0] < -1500){
-        pid_u[0] = -1500;
+      // Control signal saturation (250 - no load)
+      if (pid_u[0] >= 500){
+        pid_u[0] = 500;
+      } else if (pid_u[0] <= -500){
+        pid_u[0] = -500;
       }
 
       // Set control signal
@@ -329,6 +328,7 @@ void ControlLoopTask( void * pvParameters ){
       Serial.print(stepper_sp_dgps_c);
       Serial.print(" ");
       dtostrf(pid_set_point, 6, 3, set_point_c);
+      //dtostrf(pid_u[0], 6, 3, set_point_c);
       Serial.println(set_point_c);//*/
     }
 
@@ -435,8 +435,8 @@ void setup(){
   // Configure driver
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.toff(5);           // Enables driver in software
-  driver.rms_current(1500); // Set motor RMS current
-  driver.microsteps(4);     // Set microsteps to 1/4th
+  driver.rms_current(1000); // Set motor RMS current
+  driver.microsteps(0);     // Set microsteps to 1/2
   driver.en_spreadCycle(false); // Toggle spreadCycle on TMC2208/2209/2224
   driver.pwm_autoscale(true);   // Needed for stealthChop
   driver.shaft(stepper_dir);
@@ -476,7 +476,7 @@ void loop(){
     mode_selector = 0;
     command_msg = 0;
     // Linear Ramp using LedCPWM    
-    int max_set_point = 2000;
+    int max_set_point = 500; // Output at 30 dgps, Stepper at 900 dgps
     for (int i = 0; i < 100; i++){
       if (i < 25){
         step_freq = max_set_point*i/25;
@@ -504,15 +504,15 @@ void loop(){
       if (i < 30){
         step_freq = i - 15;
         step_freq_f = 0.104719333 * step_freq;
-        step_freq = int(1000 * sin(step_freq_f)) + 1000;
+        step_freq = int(250 * sin(step_freq_f)) + 250;
         ledcWriteTone(ledChannel, step_freq);
       } else if (i < 70){
-        step_freq = 2000;
+        step_freq = 500;
         ledcWriteTone(ledChannel, step_freq);
       } else {
         step_freq = i + 5;
         step_freq_f = 0.104719333 * step_freq;
-        step_freq = int(1000 * sin(step_freq_f)) + 1000;
+        step_freq = int(250 * sin(step_freq_f)) + 250;
         ledcWriteTone(ledChannel, step_freq);
       }
       delay(100);
@@ -539,11 +539,11 @@ void loop(){
     pid_set_point = 45;
     delay(8000);
     pid_set_point = -15;
-    delay(6000);
+    delay(8000);
     pid_set_point = 15;
     delay(7000);
     pid_set_point = -45;
-    delay(6000);
+    delay(8000);
     pid_set_point = 0;//*/
   }
 
@@ -559,13 +559,13 @@ void loop(){
     // Linear Ramp
     float max_set_point = 240;
     pid_set_point = 0;
-    for (int i = 0; i < 100; i++){
+    for (int i = 0; i < 200; i++){
       if (i < 25){
         pid_set_point = max_set_point*i/25.0;
-      } else if (i < 75){
+      } else if (i < 175){
         pid_set_point = max_set_point;
       } else {
-        pid_set_point = max_set_point*(100-i)/25.0;
+        pid_set_point = max_set_point*(200-i)/25.0;
       }
       delay(100);
     }
