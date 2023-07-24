@@ -92,10 +92,18 @@ int command_msg = 0;
 float pid_set_point = 0;
 float pid_err[] = {0, 0, 0};
 float pid_u[] = {0, 0, 0};
+float pid_u_pre_sat = 0;
 // Output Angle Control
 //float pid_num[] = {141.2, -139.8, 0}; // Too crispy
 //float pid_num[] = {83.45, -83, 0}; // Sill, too crispy
-float pid_num[] = {137.6, -1.955, -135.6}; //
+//float pid_num[] = {829, -807.5, 0}; // Too much overshoot
+//float pid_num[] = {665.4, -648.4, 0}; // Too much overshoot, but less
+//float pid_num[] = {344.3, -342.5, 0}; // Too slow, but no overshoot, BEST
+//float pid_num[] = {2349, -4264, 1935}; // Small overshoot and fast, but unstable
+//float pid_den[] = {1, 0, -1};
+//float pid_num[] = {450, -445, 0};// Works well, but slower
+//float pid_num[] = {450, -444.375, 0}; // Works almost perfectly, but slower
+float pid_num[] = {450, -443.25, 0};// Works almost perfectly
 float pid_den[] = {1, -1, 0};//*/
 
 // Custom Functions
@@ -265,34 +273,56 @@ void ControlLoopTask( void * pvParameters ){
     // PID loop
     if (mode_selector == 4){
       pid_err[0] = pid_set_point - out_angle_dg;
-      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
-      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];
 
+      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
+      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];//*/
+
+      /*pid_u_pre_sat = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
+      pid_u_pre_sat = pid_u_pre_sat - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];
+      
+      // Anti Windup
+      bool aw_f1 = false; // Anti Windup Flag 1
+      bool aw_f2 = false; // Anti Windup Flag 2
+      if (pid_u_pre_sat > 1200 || pid_u_pre_sat < -1200){ // Saturation is happening
+        aw_f1 = true;
+      }
+      if (pid_err[0] > 0 && pid_u_pre_sat > 0){ // Same positive sign
+        aw_f2 = true;
+      }
+      if (pid_err[0] < 0 && pid_u_pre_sat < 0){ // Same negative sign
+        aw_f2 = true;
+      }
+      if (aw_f1 && aw_f2){ // Activate Anti Windup, for PI controller
+        pid_u[0] = pid_u_pre_sat - pid_err[1]*(pid_num[0] + pid_num[1]); // Remove Integrator Effect (Clamping)
+      } else {
+        pid_u[0] = pid_u_pre_sat;
+      }//*/     
+      
       // Limit acceleration (1 - no load)
-      if (abs(pid_u[0]) >= step_freq + 2){
+      if (abs(pid_u[0]) >= step_freq + 20){
         int pid_u_sign;
         if (pid_u[0] >= 0){
           pid_u_sign = 1;
         } else {
           pid_u_sign = -1;
         }
-        pid_u[0] = pid_u_sign*(step_freq + 2);
-      } else if (abs(pid_u[0]) <= step_freq - 2){
+        pid_u[0] = pid_u_sign*(step_freq + 20);
+      } else if (abs(pid_u[0]) <= step_freq - 20){
         int pid_u_sign;
         if (pid_u[0] >= 0){
           pid_u_sign = 1;
         } else {
           pid_u_sign = -1;
         }
-        pid_u[0] = pid_u_sign*(step_freq - 2);
+        pid_u[0] = pid_u_sign*(step_freq - 20);
       }//*/
 
-      // Control signal saturation (250 - no load)
-      if (pid_u[0] >= 500){
-        pid_u[0] = 500;
-      } else if (pid_u[0] <= -500){
-        pid_u[0] = -500;
-      }
+      // Control signal saturation (1200 - no load) Too much saturation
+      if (pid_u[0] >= 1200){
+        pid_u[0] = 1200;
+      } else if (pid_u[0] <= -1200){
+        pid_u[0] = -1200;
+      }//*/
 
       // Set control signal
       step_freq = int(pid_u[0]);
@@ -436,7 +466,7 @@ void setup(){
   driver.begin();           // UART: Init SW UART (if selected) with default 115200 baudrate
   driver.toff(5);           // Enables driver in software
   driver.rms_current(1000); // Set motor RMS current
-  driver.microsteps(0);     // Set microsteps to 1/2
+  driver.microsteps(2);     // Set microsteps to 1/2
   driver.en_spreadCycle(false); // Toggle spreadCycle on TMC2208/2209/2224
   driver.pwm_autoscale(true);   // Needed for stealthChop
   driver.shaft(stepper_dir);
@@ -504,15 +534,15 @@ void loop(){
       if (i < 30){
         step_freq = i - 15;
         step_freq_f = 0.104719333 * step_freq;
-        step_freq = int(250 * sin(step_freq_f)) + 250;
+        step_freq = int(500 * sin(step_freq_f)) + 500;
         ledcWriteTone(ledChannel, step_freq);
       } else if (i < 70){
-        step_freq = 500;
+        step_freq = 1000;
         ledcWriteTone(ledChannel, step_freq);
       } else {
         step_freq = i + 5;
         step_freq_f = 0.104719333 * step_freq;
-        step_freq = int(250 * sin(step_freq_f)) + 250;
+        step_freq = int(500 * sin(step_freq_f)) + 500;
         ledcWriteTone(ledChannel, step_freq);
       }
       delay(100);
@@ -536,13 +566,13 @@ void loop(){
     command_msg = 0;
 
     // Step values
-    pid_set_point = 45;
+    pid_set_point = 90;
     delay(8000);
-    pid_set_point = -15;
+    pid_set_point = 30;
     delay(8000);
-    pid_set_point = 15;
+    pid_set_point = 120;
     delay(7000);
-    pid_set_point = -45;
+    pid_set_point = 60;
     delay(8000);
     pid_set_point = 0;//*/
   }
@@ -584,8 +614,8 @@ void loop(){
     // Sinusoidal signal
     // - sin(k*i + fi) -> k = 2*pi/10*T (10 - delay(100))
     float sin_angle = 0;
-    for (int i = 0; i < 150; i++){
-      sin_angle = 0.1047 * i - 1.570796; // 6s - 0.1047
+    for (int i = 0; i < 3000; i++){
+      sin_angle = 0.004 * i - 1.570796; // 6s - 0.1047
       pid_set_point = 30 * sin(sin_angle) + 30;
       /*if (i < 30){
         sin_angle = 0.104719333 * i - 1.570796;
@@ -596,7 +626,7 @@ void loop(){
         sin_angle = 0.104719333 * i + 0.5235;
         pid_set_point = 30 * sin(sin_angle) + 30;
       }*/
-      delay(100);
+      delay(10);
     }
     pid_set_point = 0;//*/
   }
