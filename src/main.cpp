@@ -42,9 +42,6 @@ static int8_t out_enc_st_table[] = {0,1,1,0,1,0,0,1,1,0,0,1,0,1,1,0};
 // Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=8Hz A BIT FASTER, LESS NOISY; NEW BEST ONE
 const float out_sp_fil_num[] = {0.01335920, 0.02671840, 0.01335920, 0};
 const float out_sp_fil_den[] = {1,-1.64745998, 0.70089678, 0};//*/
-/*// Butterworth 2nd order - Direct Form I - Single Section - fs=200Hz - fc=5Hz DELAY 
-const float out_sp_fil_num[] = {0.00554272, 0.01108543, 0.00554272, 0};
-const float out_sp_fil_den[] = {1,-1.77863177, 0.80080265, 0};//*/
 float out_sp_unfiltered[] = {0, 0, 0, 0};
 float out_sp_filtered[] = {0, 0, 0, 0};
 
@@ -318,10 +315,10 @@ void ControlLoopTask( void * pvParameters ){
       }//*/
 
       // Control signal saturation (1200 - no load) Too much saturation
-      if (pid_u[0] >= 1200){
-        pid_u[0] = 1200;
-      } else if (pid_u[0] <= -1200){
-        pid_u[0] = -1200;
+      if (pid_u[0] >= 1000){
+        pid_u[0] = 1000;
+      } else if (pid_u[0] <= -1000){
+        pid_u[0] = -1000;
       }//*/
 
       // Set control signal
@@ -565,16 +562,25 @@ void loop(){
     mode_selector = 4;
     command_msg = 0;
 
-    // Step values
-    pid_set_point = 90;
+    /*// Step values 0
+    pid_set_point = 45;
     delay(8000);
-    pid_set_point = 30;
+    pid_set_point = -15;
     delay(8000);
-    pid_set_point = 120;
-    delay(7000);
-    pid_set_point = 60;
+    pid_set_point = 15;
+    delay(8000);
+    pid_set_point = -45;
     delay(8000);
     pid_set_point = 0;//*/
+
+    // Step values 1 - For Data
+    pid_set_point = 90;
+    delay(7500);
+    pid_set_point = 60;
+    delay(7500);
+    pid_set_point = 120;
+    delay(7500);
+    pid_set_point = 30;//*/
   }
 
   // PID - Linear Ramp (53 - '5')
