@@ -7,6 +7,7 @@ Arduino Espressiff version: 2.0.6
 #include "driver/pcnt.h"
 #include "driver/mcpwm.h"
 #include <AS5048A.h>
+#include "LookUpTable.h"
 
 int led_pin = 19;
 
@@ -74,6 +75,7 @@ TaskHandle_t ControlLoopTaskHandle;
 // - Debug Output Speed Filter: 1
 // - Debug Stepper Speed Filter: 2
 // - PID mode: 4
+// - Fuzzy mode: 5
 int mode_selector = 0;
 
 // Commands (ASCII - String)
@@ -83,6 +85,7 @@ int mode_selector = 0;
 // - 52 ('4'): PID - Step values
 // - 53 ('5'): PID - Linear ramp
 // - 54 ('6'): PID - Sinusoidal
+// - 55 ('7'): Fuzzy - Step values
 int command_msg = 0;
 
 // PID
@@ -102,6 +105,11 @@ float pid_u_pre_sat = 0;
 //float pid_num[] = {450, -444.375, 0}; // Works almost perfectly, but slower
 float pid_num[] = {450, -443.25, 0};// Works almost perfectly
 float pid_den[] = {1, -1, 0};//*/
+
+// Fuzzy
+float fuzzy_set_point = 0;
+float fuzzy_err[] = {0, 0, 0};
+float fuzzy_u[] = {0, 0, 0};
 
 // Custom Functions
 void set_stepper_angle_offset_dg(){
@@ -272,28 +280,20 @@ void ControlLoopTask( void * pvParameters ){
       pid_err[0] = pid_set_point - out_angle_dg;
 
       pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
-      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];//*/
+      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];//*/   
 
-      /*pid_u_pre_sat = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
-      pid_u_pre_sat = pid_u_pre_sat - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];
-      
-      // Anti Windup
-      bool aw_f1 = false; // Anti Windup Flag 1
-      bool aw_f2 = false; // Anti Windup Flag 2
-      if (pid_u_pre_sat > 1200 || pid_u_pre_sat < -1200){ // Saturation is happening
-        aw_f1 = true;
-      }
-      if (pid_err[0] > 0 && pid_u_pre_sat > 0){ // Same positive sign
-        aw_f2 = true;
-      }
-      if (pid_err[0] < 0 && pid_u_pre_sat < 0){ // Same negative sign
-        aw_f2 = true;
-      }
-      if (aw_f1 && aw_f2){ // Activate Anti Windup, for PI controller
-        pid_u[0] = pid_u_pre_sat - pid_err[1]*(pid_num[0] + pid_num[1]); // Remove Integrator Effect (Clamping)
+      // Motor inertia
+      if (pid_err[0] > 0){
+        if (pid_u[0] < 100){
+          pid_u[0] = 100;
+        }
+      } else if (pid_err[0] < 0){
+        if (pid_u[0] > -100){
+          pid_u[0] = -100;
+        }
       } else {
-        pid_u[0] = pid_u_pre_sat;
-      }//*/     
+        pid_u[0] = 0;
+      }//*/
       
       // Limit acceleration (1 - no load)
       if (abs(pid_u[0]) >= step_freq + 20){
@@ -358,6 +358,160 @@ void ControlLoopTask( void * pvParameters ){
       //dtostrf(pid_u[0], 6, 3, set_point_c);
       Serial.println(set_point_c);//*/
     }
+
+    // Fuzzy Loop
+    if (mode_selector == 5){
+      fuzzy_err[0] = fuzzy_set_point - out_angle_dg;
+
+      // Fuzzy conditioning
+      if (fuzzy_err[0] >= 2.3){
+        fuzzy_u[0] = 2.3;
+      } else if (fuzzy_err[0] <= -2.3){
+        fuzzy_err[0] = -2.3;
+      }//*/
+
+      // Indexing
+      float d0 = fuzzy_err[0]*d0_cond;
+      int d0_i = int(d0 - d0_min);
+      float d0_r = d0 - d0_min - float(d0_i);
+
+      float d1 = fuzzy_err[1]*d1_cond;
+      int d1_i = int(d1 - d1_min);
+      float d1_r = d1 - d1_min - float(d1_i);
+
+      if (d0_i >= 46){
+        d0_i = 46;
+      } else if (d0_i <= 0){
+        d0_i = 0;
+      }
+      
+      if (d1_i >= 46){
+        d1_i = 46;
+      } else if (d1_i <= 0){
+        d1_i = 0;
+      }//*/
+
+      // Calculating with Look Up Table
+      if (d0_i >= d0_n){
+        if (d1_i >= d1_n){
+          // Easy, no calculation
+          fuzzy_u[0] = look_up_table[d0_i][d1_i];
+        }
+        else {
+          // Calculation on d1
+          float a = look_up_table[d0_i][d1_i];
+          float b = look_up_table[d0_i][d1_i + 1];
+          fuzzy_u[0] = d1_r*(b-a) + a;
+        }
+      } else {
+        if (d1_i >= d1_n){
+          // Calculation on d0
+          float a = look_up_table[d0_i][d1_i];
+          float b = look_up_table[d0_i + 1][d1_i];          
+          fuzzy_u[0] = d0_r*(b-a) + a;
+        }
+        else {
+          // Calculation on d0 and d1
+          float a1 = look_up_table[d0_i][d1_i];
+          float a2 = look_up_table[d0_i + 1][d1_i];
+          float b1 = look_up_table[d0_i][d1_i + 1];
+          float b2 = look_up_table[d0_i + 1][d1_i + 1];                   
+          float a = d0_r*(a2-a1) + a1;
+          float b = d0_r*(b2-b1) + b1;
+          fuzzy_u[0] = d1_r*(b-a) + a;
+        }
+      }
+      fuzzy_u[0] = fuzzy_u[0] + fuzzy_u[1]; // Check!!!!!!!!!!!!!!!!!!!!!
+
+      // Limit Control signal near zero
+      if (fuzzy_err[0] > -0.2 && fuzzy_err[0] < 0.2){
+        if (fuzzy_u[0] > 200){
+          fuzzy_u[0] = 200;
+        } else if (fuzzy_u[0] < -200){
+          fuzzy_u[0] = -200;
+        }
+      }
+
+      if (fuzzy_err[0] > -0.02 && fuzzy_err[0] < 0.02){
+        fuzzy_u[0] = 0;
+      }
+      
+      // Motor inertia
+      /*if (fuzzy_err[0] > 0.02){
+        if (fuzzy_u[0] < 120){
+          fuzzy_u[0] = 100;
+        }
+      } else if (fuzzy_err[0] < -0.02){
+        if (fuzzy_u[0] > -120){
+          fuzzy_u[0] = -100;
+        }
+      } else {
+        fuzzy_u[0] = 0;
+      }//*/
+
+      // Limit acceleration (1 - no load)
+      /*if (abs(fuzzy_u[0]) >= step_freq + 20){
+        int fuzzy_u_sign;
+        if (fuzzy_u[0] >= 0){
+          fuzzy_u_sign = 1;
+        } else {
+          fuzzy_u_sign = -1;
+        }
+        fuzzy_u[0] = fuzzy_u_sign*(step_freq + 20);
+      } else if (abs(fuzzy_u[0]) <= step_freq - 20){
+        int fuzzy_u_sign;
+        if (fuzzy_u[0] >= 0){
+          fuzzy_u_sign = 1;
+        } else {
+          fuzzy_u_sign = -1;
+        }
+        fuzzy_u[0] = fuzzy_u_sign*(step_freq - 20);
+      }//*/
+
+      // Control signal saturation (1200 - no load) Too much saturation
+      if (fuzzy_u[0] >= 1000){
+        fuzzy_u[0] = 1000;
+      } else if (fuzzy_u[0] <= -1000){
+        fuzzy_u[0] = -1000;
+      }//*/
+
+      // Set control signal
+      step_freq = int(fuzzy_u[0]);
+      if (step_freq >= 0){
+        stepper_dir = false;
+      } else {
+        stepper_dir = true;
+        step_freq = step_freq*-1;
+      }
+      driver.shaft(stepper_dir);
+      ledcWriteTone(ledChannel, step_freq);
+
+      // Update data
+      fuzzy_err[1] = fuzzy_err[0];
+      fuzzy_err[2] = fuzzy_err[1];
+      fuzzy_u[1] = fuzzy_u[0];
+      fuzzy_u[2] = fuzzy_u[1];//*/
+
+      // Send data as stream of ASCII characters, takes 250us
+      Serial.print(itoa(step_freq, step_freq_c, 10));
+      Serial.print(" ");
+      dtostrf(out_angle_dg, 6, 3, out_angle_dg_c);
+      Serial.print(out_angle_dg_c);
+      Serial.print(" ");
+      //dtostrf(out_sp_dgps, 6, 3, out_sp_dgps_c);    
+      dtostrf(out_sp_filtered[0], 6, 3, out_sp_dgps_c);
+      Serial.print(out_sp_dgps_c);
+      Serial.print(" ");
+      dtostrf(stepper_angle_dg, 6, 3, stepper_angle_dg_c);
+      Serial.print(stepper_angle_dg_c);
+      Serial.print(" ");
+      dtostrf(st_sp_filtered[0], 6, 3, stepper_sp_dgps_c);
+      Serial.print(stepper_sp_dgps_c);
+      Serial.print(" ");
+      dtostrf(fuzzy_set_point, 6, 3, set_point_c);
+      //dtostrf(pid_u[0], 6, 3, set_point_c);
+      Serial.println(set_point_c);//*/
+    }    
 
     // End of loop
     digitalWrite(led_pin, LOW);
@@ -606,7 +760,7 @@ void loop(){
       delay(100);
     }
     pid_set_point = 0;//*/
-  }  
+  }
 
   // PID - Sinusoidal (54 - '6')
   if (command_msg == 54){ // ASCII for 6
@@ -635,6 +789,81 @@ void loop(){
       delay(10);
     }
     pid_set_point = 0;//*/
+  }
+
+  // Fuzzy - Step values (55 - '7)
+  if (command_msg == 55){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+
+    /*// Step values 0
+    fuzzy_set_point = 45;
+    delay(8000);
+    fuzzy_set_point = -15;
+    delay(8000);
+    fuzzy_set_point = 15;
+    delay(8000);
+    fuzzy_set_point = -45;
+    delay(8000);
+    fuzzy_set_point = 0;//*/
+
+    // Step values 1 - For Data
+    fuzzy_set_point = 90;
+    delay(7500);
+    fuzzy_set_point = 60;
+    delay(7500);
+    fuzzy_set_point = 120;
+    delay(7500);
+    fuzzy_set_point = 30;//*/
+  }
+
+  // Fuzzy - Linear Ramp (56 - '8')
+  if (command_msg == 56){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+
+    // Linear Ramp
+    float max_set_point = 240;
+    fuzzy_set_point = 0;
+    for (int i = 0; i < 200; i++){
+      if (i < 25){
+        fuzzy_set_point = max_set_point*i/25.0;
+      } else if (i < 175){
+        fuzzy_set_point = max_set_point;
+      } else {
+        fuzzy_set_point = max_set_point*(200-i)/25.0;
+      }
+      delay(100);
+    }
+    fuzzy_set_point = 0;//*/
+  }  
+
+  // Fuzzy - Sinusoidal (57 - '9')
+  if (command_msg == 57){ // ASCII for 9
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;    
+
+    // Sinusoidal signal
+    // - sin(k*i + fi) -> k = 2*pi/10*T (10 - delay(100))
+    float sin_angle = 0;
+    for (int i = 0; i < 3000; i++){
+      sin_angle = 0.004 * i - 1.570796; // 6s - 0.1047
+      fuzzy_set_point = 30 * sin(sin_angle) + 30;
+      delay(10);
+    }
+    fuzzy_set_point = 0;//*/
   }
 
 }
