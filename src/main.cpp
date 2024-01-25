@@ -7,7 +7,7 @@ Arduino Espressiff version: 2.0.6
 #include "driver/pcnt.h"
 #include "driver/mcpwm.h"
 #include <AS5048A.h>
-#include "LookUpTable.h"
+#include "LookUpTableV3.h"
 
 int led_pin = 19;
 
@@ -94,16 +94,9 @@ float pid_err[] = {0, 0, 0};
 float pid_u[] = {0, 0, 0};
 float pid_u_pre_sat = 0;
 // Output Angle Control
-//float pid_num[] = {141.2, -139.8, 0}; // Too crispy
-//float pid_num[] = {83.45, -83, 0}; // Sill, too crispy
-//float pid_num[] = {829, -807.5, 0}; // Too much overshoot
-//float pid_num[] = {665.4, -648.4, 0}; // Too much overshoot, but less
-//float pid_num[] = {344.3, -342.5, 0}; // Too slow, but no overshoot, BEST
-//float pid_num[] = {2349, -4264, 1935}; // Small overshoot and fast, but unstable
-//float pid_den[] = {1, 0, -1};
-//float pid_num[] = {450, -445, 0};// Works well, but slower
-//float pid_num[] = {450, -444.375, 0}; // Works almost perfectly, but slower
-float pid_num[] = {450, -443.25, 0};// Works almost perfectly
+/*float pid_num[] = {450, -443.25, 0};// Works almost perfectly
+float pid_den[] = {1, -1, 0};//*/
+float pid_num[] = {201.3, -198.8, 0};// ...
 float pid_den[] = {1, -1, 0};//*/
 
 // Fuzzy
@@ -279,11 +272,28 @@ void ControlLoopTask( void * pvParameters ){
     if (mode_selector == 4){
       pid_err[0] = pid_set_point - out_angle_dg;
 
-      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1] + pid_err[2]*pid_num[2];
-      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1] - pid_u[2]*pid_den[2];//*/   
+      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1];// + pid_err[2]*pid_num[2];
+      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1];// - pid_u[2]*pid_den[2];//*/ 
+
+      /*if (pid_err[0] >= -0.03 && pid_err[0] <= 0.03){
+        pid_u[0] = 50;
+      }//*/ 
+
+      // Limit Control signal near zero
+      if (pid_err[0] > -0.2 && pid_err[0] < 0.2){
+        if (pid_u[0] > 0){
+          pid_u[0] = 200;
+        } else if (pid_u[0] < 0){
+          pid_u[0] = -200;
+        }
+      }
+
+      if (pid_err[0] > -0.02 && pid_err[0] < 0.02){
+        pid_u[0] = 0;
+      }//*/
 
       // Motor inertia
-      if (pid_err[0] > 0){
+      /*if (pid_err[0] > 0){
         if (pid_u[0] < 100){
           pid_u[0] = 100;
         }
@@ -296,7 +306,7 @@ void ControlLoopTask( void * pvParameters ){
       }//*/
       
       // Limit acceleration (1 - no load)
-      if (abs(pid_u[0]) >= step_freq + 20){
+      /*if (abs(pid_u[0]) >= step_freq + 20){
         int pid_u_sign;
         if (pid_u[0] >= 0){
           pid_u_sign = 1;
@@ -322,20 +332,22 @@ void ControlLoopTask( void * pvParameters ){
       }//*/
 
       // Set control signal
+      int16_t abs_step_freq = 0;
       step_freq = int(pid_u[0]);
       if (step_freq >= 0){
         stepper_dir = false;
+        abs_step_freq = step_freq;
       } else {
         stepper_dir = true;
-        step_freq = step_freq*-1;
+        abs_step_freq = step_freq*-1;
       }
       driver.shaft(stepper_dir);
-      ledcWriteTone(ledChannel, step_freq);
+      ledcWriteTone(ledChannel, abs_step_freq);
 
       // Update data
       pid_err[1] = pid_err[0];
       pid_err[2] = pid_err[1];
-      pid_u[1] = pid_u[0];
+      pid_u[1] = pid_u[0];//1.0*int(pid_u[0]);
       pid_u[2] = pid_u[1];//*/
 
       // Send data as stream of ASCII characters, takes 250us
@@ -364,10 +376,10 @@ void ControlLoopTask( void * pvParameters ){
       fuzzy_err[0] = fuzzy_set_point - out_angle_dg;
 
       // Fuzzy conditioning
-      if (fuzzy_err[0] >= 2.3){
-        fuzzy_u[0] = 2.3;
-      } else if (fuzzy_err[0] <= -2.3){
-        fuzzy_err[0] = -2.3;
+      if (fuzzy_err[0] >= sat_sup){
+        fuzzy_u[0] = sat_sup;
+      } else if (fuzzy_err[0] <= sat_inf){
+        fuzzy_err[0] = sat_inf;
       }//*/
 
       // Indexing
@@ -379,14 +391,14 @@ void ControlLoopTask( void * pvParameters ){
       int d1_i = int(d1 - d1_min);
       float d1_r = d1 - d1_min - float(d1_i);
 
-      if (d0_i >= 46){
-        d0_i = 46;
+      if (d0_i >= d0_n){
+        d0_i = d0_n;
       } else if (d0_i <= 0){
         d0_i = 0;
       }
       
-      if (d1_i >= 46){
-        d1_i = 46;
+      if (d1_i >= d1_n){
+        d1_i = d1_n;
       } else if (d1_i <= 0){
         d1_i = 0;
       }//*/
@@ -421,20 +433,46 @@ void ControlLoopTask( void * pvParameters ){
           fuzzy_u[0] = d1_r*(b-a) + a;
         }
       }
-      fuzzy_u[0] = fuzzy_u[0] + fuzzy_u[1]; // Check!!!!!!!!!!!!!!!!!!!!!
+
+      // Gain
+
+      //fuzzy_u[0] = fuzzy_u[0] + fuzzy_u[1]; // Check!!!!!!!!!!!!!!!!!!!!!
+
+      float guk1 = 0;
+
+      if (fuzzy_err[0] >= -0.2 && fuzzy_err[0] <= 0.2){
+        guk1 = 0;
+      } else{
+        guk1 = 1;
+      }
+
+      fuzzy_u[0] = fuzzy_u[0] + guk1*fuzzy_u[1];//*/
 
       // Limit Control signal near zero
       if (fuzzy_err[0] > -0.2 && fuzzy_err[0] < 0.2){
-        if (fuzzy_u[0] > 200){
+        if (fuzzy_err[0] > 0){
           fuzzy_u[0] = 200;
-        } else if (fuzzy_u[0] < -200){
+        } else if (fuzzy_err[0] < -0){
           fuzzy_u[0] = -200;
         }
-      }
+      }//*/
 
       if (fuzzy_err[0] > -0.02 && fuzzy_err[0] < 0.02){
         fuzzy_u[0] = 0;
-      }
+      }//*/
+
+      // Motor inertia from PID
+      /*if (fuzzy_err[0] > 0){
+        if (fuzzy_u[0] < 100){
+          fuzzy_u[0] = 100;
+        }
+      } else if (fuzzy_err[0] < 0){
+        if (fuzzy_u[0] > -100){
+          fuzzy_u[0] = -100;
+        }
+      } else {
+        fuzzy_u[0] = 0;
+      }//*/
       
       // Motor inertia
       /*if (fuzzy_err[0] > 0.02){
@@ -476,7 +514,7 @@ void ControlLoopTask( void * pvParameters ){
       }//*/
 
       // Set control signal
-      step_freq = int(fuzzy_u[0]);
+      /*step_freq = int(fuzzy_u[0]);
       if (step_freq >= 0){
         stepper_dir = false;
       } else {
@@ -484,7 +522,18 @@ void ControlLoopTask( void * pvParameters ){
         step_freq = step_freq*-1;
       }
       driver.shaft(stepper_dir);
-      ledcWriteTone(ledChannel, step_freq);
+      ledcWriteTone(ledChannel, step_freq);//*/      
+      int16_t abs_step_freq = 0;
+      step_freq = int(fuzzy_u[0]);
+      if (step_freq >= 0){
+        stepper_dir = false;
+        abs_step_freq = step_freq;
+      } else {
+        stepper_dir = true;
+        abs_step_freq = step_freq*-1;
+      }
+      driver.shaft(stepper_dir);
+      ledcWriteTone(ledChannel, abs_step_freq);
 
       // Update data
       fuzzy_err[1] = fuzzy_err[0];
@@ -864,6 +913,29 @@ void loop(){
       delay(10);
     }
     fuzzy_set_point = 0;//*/
+  }
+
+  // Debug - Output Speed Filter (65 - 'A')
+  if (command_msg == 65){
+    mode_selector = 1;
+    command_msg = 0;
+    // Linear Ramp using LedCPWM    
+    int max_set_point = 1000; // Output at 30 dgps, Stepper at 900 dgps
+    for (int i = 0; i < 300; i++){
+      if (i < 25){
+        step_freq = max_set_point*i/25;
+        ledcWriteTone(ledChannel, step_freq);
+      } else if (i < 275){
+        step_freq = max_set_point;
+        ledcWriteTone(ledChannel, step_freq);
+      } else {
+        step_freq = max_set_point*(300-i)/25;
+        ledcWriteTone(ledChannel, step_freq);
+      }
+      delay(100);
+    }
+    step_freq = 0;
+    ledcWrite(ledChannel, 0);  
   }
 
 }
