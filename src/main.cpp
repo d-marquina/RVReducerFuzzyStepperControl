@@ -21,6 +21,7 @@ bool stepper_dir = false;                      // CCW, Positive
 
 // setting PWM properties
 int16_t step_freq = 0; // 2kHz
+int16_t abs_step_freq = 0;
 const int ledChannel = 0;
 
 // PCNT unit parameters
@@ -90,19 +91,19 @@ int command_msg = 0;
 
 // PID
 float pid_set_point = 0;
-float pid_err[] = {0, 0, 0};
-float pid_u[] = {0, 0, 0};
+float pid_err[] = {0, 0};
+float pid_u[] = {0, 0};
 float pid_u_pre_sat = 0;
 // Output Angle Control
-/*float pid_num[] = {450, -443.25, 0};// Works almost perfectly
-float pid_den[] = {1, -1, 0};//*/
-float pid_num[] = {201.3, -198.8, 0};// ...
-float pid_den[] = {1, -1, 0};//*/
+float pid_num[] = {201.3, -198.8};
+float pid_den[] = {1, -1};
 
 // Fuzzy
 float fuzzy_set_point = 0;
-float fuzzy_err[] = {0, 0, 0};
-float fuzzy_u[] = {0, 0, 0};
+float fuzzy_err[] = {0, 0};
+float fuzzy_u[] = {0, 0};
+float df0 = 0;
+float Gf = 0;
 
 // Custom Functions
 void set_stepper_angle_offset_dg(){
@@ -228,8 +229,6 @@ void debugAS5048A(){
 
 //ControlLoopTask: blinks an LED every 1000 ms
 void ControlLoopTask( void * pvParameters ){
-  //Serial.print("Control Loop Task running on core ");
-  //Serial.println(xPortGetCoreID());
   const TickType_t taskPeriod = 5; // ms
   TickType_t xLastWakeTime = xTaskGetTickCount();
 
@@ -272,14 +271,10 @@ void ControlLoopTask( void * pvParameters ){
     if (mode_selector == 4){
       pid_err[0] = pid_set_point - out_angle_dg;
 
-      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1];// + pid_err[2]*pid_num[2];
-      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1];// - pid_u[2]*pid_den[2];//*/ 
+      pid_u[0] = pid_err[0]*pid_num[0] + pid_err[1]*pid_num[1];
+      pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1];
 
-      /*if (pid_err[0] >= -0.03 && pid_err[0] <= 0.03){
-        pid_u[0] = 50;
-      }//*/ 
-
-      // Limit Control signal near zero
+      // Impulsive controller
       if (pid_err[0] > -0.2 && pid_err[0] < 0.2){
         if (pid_u[0] > 0){
           pid_u[0] = 200;
@@ -292,38 +287,6 @@ void ControlLoopTask( void * pvParameters ){
         pid_u[0] = 0;
       }//*/
 
-      // Motor inertia
-      /*if (pid_err[0] > 0){
-        if (pid_u[0] < 100){
-          pid_u[0] = 100;
-        }
-      } else if (pid_err[0] < 0){
-        if (pid_u[0] > -100){
-          pid_u[0] = -100;
-        }
-      } else {
-        pid_u[0] = 0;
-      }//*/
-      
-      // Limit acceleration (1 - no load)
-      /*if (abs(pid_u[0]) >= step_freq + 20){
-        int pid_u_sign;
-        if (pid_u[0] >= 0){
-          pid_u_sign = 1;
-        } else {
-          pid_u_sign = -1;
-        }
-        pid_u[0] = pid_u_sign*(step_freq + 20);
-      } else if (abs(pid_u[0]) <= step_freq - 20){
-        int pid_u_sign;
-        if (pid_u[0] >= 0){
-          pid_u_sign = 1;
-        } else {
-          pid_u_sign = -1;
-        }
-        pid_u[0] = pid_u_sign*(step_freq - 20);
-      }//*/
-
       // Control signal saturation (1200 - no load) Too much saturation
       if (pid_u[0] >= 1000){
         pid_u[0] = 1000;
@@ -332,7 +295,6 @@ void ControlLoopTask( void * pvParameters ){
       }//*/
 
       // Set control signal
-      int16_t abs_step_freq = 0;
       step_freq = int(pid_u[0]);
       if (step_freq >= 0){
         stepper_dir = false;
@@ -346,9 +308,7 @@ void ControlLoopTask( void * pvParameters ){
 
       // Update data
       pid_err[1] = pid_err[0];
-      pid_err[2] = pid_err[1];
-      pid_u[1] = pid_u[0];//1.0*int(pid_u[0]);
-      pid_u[2] = pid_u[1];//*/
+      pid_u[1] = pid_u[0];
 
       // Send data as stream of ASCII characters, takes 250us
       Serial.print(itoa(step_freq, step_freq_c, 10));
@@ -434,21 +394,18 @@ void ControlLoopTask( void * pvParameters ){
         }
       }
 
-      // Gain
-
-      //fuzzy_u[0] = fuzzy_u[0] + fuzzy_u[1]; // Check!!!!!!!!!!!!!!!!!!!!!
-
-      float guk1 = 0;
-
-      if (fuzzy_err[0] >= -0.2 && fuzzy_err[0] <= 0.2){
-        guk1 = 0;
+      // Gain Schedule
+      if (fuzzy_err[0] > -0.2 && fuzzy_err[0] < 0.2){
+        df0 = 0;
+        Gf = 0.75;//200.0/283.0;
       } else{
-        guk1 = 1;
+        df0 = 1;
+        Gf = 1;
       }
 
-      fuzzy_u[0] = fuzzy_u[0] + guk1*fuzzy_u[1];//*/
+      fuzzy_u[0] = Gf*(fuzzy_u[0] + df0*fuzzy_u[1]);//*/
 
-      // Limit Control signal near zero
+      // Impulsive controller
       if (fuzzy_err[0] > -0.2 && fuzzy_err[0] < 0.2){
         if (fuzzy_err[0] > 0){
           fuzzy_u[0] = 200;
@@ -461,52 +418,7 @@ void ControlLoopTask( void * pvParameters ){
         fuzzy_u[0] = 0;
       }//*/
 
-      // Motor inertia from PID
-      /*if (fuzzy_err[0] > 0){
-        if (fuzzy_u[0] < 100){
-          fuzzy_u[0] = 100;
-        }
-      } else if (fuzzy_err[0] < 0){
-        if (fuzzy_u[0] > -100){
-          fuzzy_u[0] = -100;
-        }
-      } else {
-        fuzzy_u[0] = 0;
-      }//*/
-      
-      // Motor inertia
-      /*if (fuzzy_err[0] > 0.02){
-        if (fuzzy_u[0] < 120){
-          fuzzy_u[0] = 100;
-        }
-      } else if (fuzzy_err[0] < -0.02){
-        if (fuzzy_u[0] > -120){
-          fuzzy_u[0] = -100;
-        }
-      } else {
-        fuzzy_u[0] = 0;
-      }//*/
-
-      // Limit acceleration (1 - no load)
-      /*if (abs(fuzzy_u[0]) >= step_freq + 20){
-        int fuzzy_u_sign;
-        if (fuzzy_u[0] >= 0){
-          fuzzy_u_sign = 1;
-        } else {
-          fuzzy_u_sign = -1;
-        }
-        fuzzy_u[0] = fuzzy_u_sign*(step_freq + 20);
-      } else if (abs(fuzzy_u[0]) <= step_freq - 20){
-        int fuzzy_u_sign;
-        if (fuzzy_u[0] >= 0){
-          fuzzy_u_sign = 1;
-        } else {
-          fuzzy_u_sign = -1;
-        }
-        fuzzy_u[0] = fuzzy_u_sign*(step_freq - 20);
-      }//*/
-
-      // Control signal saturation (1200 - no load) Too much saturation
+      // Control signal saturation (1000 - no load) Too much saturation
       if (fuzzy_u[0] >= 1000){
         fuzzy_u[0] = 1000;
       } else if (fuzzy_u[0] <= -1000){
@@ -514,16 +426,6 @@ void ControlLoopTask( void * pvParameters ){
       }//*/
 
       // Set control signal
-      /*step_freq = int(fuzzy_u[0]);
-      if (step_freq >= 0){
-        stepper_dir = false;
-      } else {
-        stepper_dir = true;
-        step_freq = step_freq*-1;
-      }
-      driver.shaft(stepper_dir);
-      ledcWriteTone(ledChannel, step_freq);//*/      
-      int16_t abs_step_freq = 0;
       step_freq = int(fuzzy_u[0]);
       if (step_freq >= 0){
         stepper_dir = false;
@@ -537,9 +439,7 @@ void ControlLoopTask( void * pvParameters ){
 
       // Update data
       fuzzy_err[1] = fuzzy_err[0];
-      fuzzy_err[2] = fuzzy_err[1];
-      fuzzy_u[1] = fuzzy_u[0];
-      fuzzy_u[2] = fuzzy_u[1];//*/
+      fuzzy_u[1] = fuzzy_u[0];//*/
 
       // Send data as stream of ASCII characters, takes 250us
       Serial.print(itoa(step_freq, step_freq_c, 10));
