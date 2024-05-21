@@ -97,6 +97,7 @@ float pid_u_pre_sat = 0;
 // Output Angle Control
 float pid_num[] = {201.3, -198.8};
 float pid_den[] = {1, -1};
+int imp_cont_enabled = 1;
 
 // Fuzzy
 float fuzzy_set_point = 0;
@@ -275,17 +276,18 @@ void ControlLoopTask( void * pvParameters ){
       pid_u[0] = pid_u[0] - pid_u[1]*pid_den[1];
 
       // Impulsive controller
-      if (pid_err[0] > -0.2 && pid_err[0] < 0.2){
-        if (pid_u[0] > 0){
-          pid_u[0] = 200;
-        } else if (pid_u[0] < 0){
-          pid_u[0] = -200;
+      if (imp_cont_enabled > 0){        
+        if (pid_err[0] > -0.2 && pid_err[0] < 0.2){
+          if (pid_u[0] > 0){
+            pid_u[0] = 200;
+          } else if (pid_u[0] < 0){
+            pid_u[0] = -200;
+          }
         }
-      }
-
-      if (pid_err[0] > -0.02 && pid_err[0] < 0.02){
-        pid_u[0] = 0;
-      }//*/
+        if (pid_err[0] > -0.02 && pid_err[0] < 0.02){
+          pid_u[0] = 0;
+        }//*/
+      }      
 
       // Control signal saturation (1200 - no load) Too much saturation
       if (pid_u[0] >= 1000){
@@ -406,18 +408,20 @@ void ControlLoopTask( void * pvParameters ){
       fuzzy_u[0] = Gf*(fuzzy_u[0] + df0*fuzzy_u[1]);//*/
 
       // Impulsive controller
-      if (fuzzy_err[0] > -0.2 && fuzzy_err[0] < 0.2){
-        if (fuzzy_err[0] > 0){
-          fuzzy_u[0] = 200;
-        } else if (fuzzy_err[0] < -0){
-          fuzzy_u[0] = -200;
-        }
-      }//*/
+      if (imp_cont_enabled > 0){
+        if (fuzzy_err[0] > -0.2 && fuzzy_err[0] < 0.2){
+          if (fuzzy_err[0] > 0){
+            fuzzy_u[0] = 200;
+          } else if (fuzzy_err[0] < -0){
+            fuzzy_u[0] = -200;
+          }
+        }//*/
 
-      if (fuzzy_err[0] > -0.02 && fuzzy_err[0] < 0.02){
-        fuzzy_u[0] = 0;
-      }//*/
-
+        if (fuzzy_err[0] > -0.02 && fuzzy_err[0] < 0.02){
+          fuzzy_u[0] = 0;
+        }//*/
+      }
+      
       // Control signal saturation (1000 - no load) Too much saturation
       if (fuzzy_u[0] >= 1000){
         fuzzy_u[0] = 1000;
@@ -597,6 +601,12 @@ void loop(){
 
   // Open Loop - External signal (49 - '1')
   if (command_msg == 49){
+    /* Marlin Configuration
+      - M92 B33.33
+      - M203 B30
+      - M201 B50
+      - G0 B120 F1800
+    */
     mode_selector = 0;
     command_msg = 0;
   }
@@ -664,6 +674,7 @@ void loop(){
     // - outputAngle: 180 dg
     mode_selector = 4;
     command_msg = 0;
+    imp_cont_enabled = 1;
 
     /*// Step values 0
     pid_set_point = 45;
@@ -677,7 +688,9 @@ void loop(){
     pid_set_point = 0;//*/
 
     // Step values 1 - For Data
-    pid_set_point = 90;
+    pid_set_point = 30;
+    delay(500);
+    /*pid_set_point = 90;
     delay(7500);
     pid_set_point = 60;
     delay(7500);
@@ -694,6 +707,7 @@ void loop(){
     // - outputAngle: 180 dg
     mode_selector = 4;
     command_msg = 0;
+    imp_cont_enabled = 1;
 
     // Linear Ramp
     float max_set_point = 240;
@@ -712,13 +726,14 @@ void loop(){
   }
 
   // PID - Sinusoidal (54 - '6')
-  if (command_msg == 54){ // ASCII for 6
+  if (command_msg == 54){
     // Set point values:
     // - outputSpeed: 30 dg/s
     // - stepperSpeed: 900 dg/s 
     // - outputAngle: 180 dg
     mode_selector = 4;
-    command_msg = 0;    
+    command_msg = 0;
+    imp_cont_enabled = 1;
 
     // Sinusoidal signal
     // - sin(k*i + fi) -> k = 2*pi/10*T (10 - delay(100))
@@ -748,6 +763,7 @@ void loop(){
     // - outputAngle: 180 dg
     mode_selector = 5;
     command_msg = 0;
+    imp_cont_enabled = 1;
 
     /*// Step values 0
     fuzzy_set_point = 45;
@@ -778,6 +794,7 @@ void loop(){
     // - outputAngle: 180 dg
     mode_selector = 5;
     command_msg = 0;
+    imp_cont_enabled = 1;
 
     // Linear Ramp
     float max_set_point = 240;
@@ -796,13 +813,14 @@ void loop(){
   }  
 
   // Fuzzy - Sinusoidal (57 - '9')
-  if (command_msg == 57){ // ASCII for 9
+  if (command_msg == 57){
     // Set point values:
     // - outputSpeed: 30 dg/s
     // - stepperSpeed: 900 dg/s 
     // - outputAngle: 180 dg
     mode_selector = 5;
-    command_msg = 0;    
+    command_msg = 0;
+    imp_cont_enabled = 1;   
 
     // Sinusoidal signal
     // - sin(k*i + fi) -> k = 2*pi/10*T (10 - delay(100))
@@ -819,6 +837,7 @@ void loop(){
   if (command_msg == 65){
     mode_selector = 1;
     command_msg = 0;
+    imp_cont_enabled = 1;
     // Linear Ramp using LedCPWM    
     int max_set_point = 1000; // Output at 30 dgps, Stepper at 900 dgps
     for (int i = 0; i < 300; i++){
@@ -836,6 +855,250 @@ void loop(){
     }
     step_freq = 0;
     ledcWrite(ledChannel, 0);  
+  }
+
+  //////////////////////////
+  // PI - Step 30 (66 - 'B')
+  if (command_msg == 66){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    pid_set_point = 30;
+    delay(500);
+  }
+
+  // PI - Step 60 (67 - 'C')
+  if (command_msg == 67){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    pid_set_point = 60;
+    delay(500);
+  }
+
+  // PI - Step 90 (68 - 'D')
+  if (command_msg == 68){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    pid_set_point = 90;
+    delay(500);
+  }
+
+  // PI - Step 120 (69 - 'E')
+  if (command_msg == 69){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    pid_set_point = 120;
+    delay(500);
+  }
+
+  ////////////////////////////
+  // PI+i - Step 30 (70 - 'F')
+  if (command_msg == 70){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    pid_set_point = 30;
+    delay(500);
+  }
+
+  // PI+i - Step 60 (71 - 'G')
+  if (command_msg == 71){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    pid_set_point = 60;
+    delay(500);
+  }
+
+  // PI+i - Step 90 (72 - 'H')
+  if (command_msg == 72){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    pid_set_point = 90;
+    delay(500);
+  }
+
+  // PI+i - Step 120 (73 - 'I')
+  if (command_msg == 73){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 4;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    pid_set_point = 120;
+    delay(500);
+  }
+
+  /////////////////////////////
+  // Fuzzy - Step 30 (74 - 'J')
+  if (command_msg == 74){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    fuzzy_set_point = 30;
+    delay(500);
+  }
+
+  // Fuzzy - Step 60 (75 - 'K')
+  if (command_msg == 75){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    fuzzy_set_point = 60;
+    delay(500);
+  }
+
+  // Fuzzy - Step 90 (76 - 'L')
+  if (command_msg == 76){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    fuzzy_set_point = 90;
+    delay(500);
+  }
+
+  // Fuzzy - Step 120 (77 - 'M')
+  if (command_msg == 77){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 0;
+
+    // Phase 1
+    fuzzy_set_point = 120;
+    delay(500);
+  }
+
+  ///////////////////////////////
+  // Fuzzy+i - Step 30 (78 - 'N')
+  if (command_msg == 78){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    fuzzy_set_point = 30;
+    delay(500);
+  }
+
+  // Fuzzy+i - Step 60 (79 - 'O')
+  if (command_msg == 79){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    fuzzy_set_point = 60;
+    delay(500);
+  }
+
+  // Fuzzy+i - Step 90 (80 - 'P')
+  if (command_msg == 80){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    fuzzy_set_point = 90;
+    delay(500);
+  }
+
+  // Fuzzy+i - Step 120 (81 - 'Q')
+  if (command_msg == 81){
+    // Set point values:
+    // - outputSpeed: 30 dg/s
+    // - stepperSpeed: 900 dg/s 
+    // - outputAngle: 180 dg
+    mode_selector = 5;
+    command_msg = 0;
+    imp_cont_enabled = 1;
+
+    // Phase 1
+    fuzzy_set_point = 120;
+    delay(500);
   }
 
 }
